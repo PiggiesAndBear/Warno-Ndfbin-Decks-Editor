@@ -22,9 +22,3 @@ venv/
 .workbuddy/
 .vscode/
 .idea/
-
-# --- local experiments ----------------------------------------------------
-# Half-finished recon, one-off migration scripts, anything parked for later.
-_sandbox/
-*.orig
-*.rej
