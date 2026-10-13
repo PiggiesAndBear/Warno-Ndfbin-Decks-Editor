@@ -1,0 +1,30 @@
+# --- build output ---------------------------------------------------------
+# `dist/` holds the released binary and `dist_<ver>/` the candidate for the
+# version being built; neither belongs in git.  A 37 MB one-file EXE would make
+# every clone heavy, and because git keeps every blob forever, each future
+# version would add another 37 MB to the history.  Releases are attached to a
+# GitHub Release instead -- see the README.
+dist/
+dist_*/
+build/
+build_*/
+
+# --- python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# --- tooling --------------------------------------------------------------
+# Editor/agent scratch space: memory logs and per-session state, not sources.
+.workbuddy/
+.vscode/
+.idea/
+
+# --- local experiments ----------------------------------------------------
+# Half-finished recon, one-off migration scripts, anything parked for later.
+_sandbox/
+*.orig
+*.rej

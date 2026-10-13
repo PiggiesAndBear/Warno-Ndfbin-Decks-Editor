@@ -1,2 +1,15 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Batch files must be CRLF on disk whatever the machine's git settings say.
+# cmd.exe reads a batch file line by line and a lone LF is not always accepted
+# as a line terminator -- control flow (`goto`, labels) is where it shows up,
+# and it shows up as a script that silently does the wrong thing rather than
+# as an error.  `text=auto` alone would only convert on a checkout that has
+# autocrlf enabled, so the ending is pinned here instead.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# The icon is binary; without this, `text=auto` may still decide to inspect it.
+*.ico binary
+*.png binary
