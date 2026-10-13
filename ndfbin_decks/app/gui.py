@@ -135,7 +135,19 @@ class SearchableComboBox(QComboBox):
     # -- population -------------------------------------------------------
 
     def set_options(self, options, *, select: int = 0) -> None:
-        """Repopulate from ``[(label, data), ...]``."""
+        """Repopulate from ``[(label, data), ...]``.
+
+        **Deliberately silent.**  Swapping the rows walks the combo through
+        ``currentIndex = -1`` and through a half-built list; emitting on the
+        way makes every listener — the tree reads these filters — run against
+        that intermediate state.  The re-fill therefore notifies nobody, and
+        the *caller* refreshes afterwards, because only the caller knows
+        whether the list it just filled is the one on screen now.
+
+        Signals are blocked for the rebuild so Qt's own housekeeping during
+        ``clear()`` cannot escape either.
+        """
+        self.blockSignals(True)
         self._source.clear()
         for label, data in options:
             item = QStandardItem(label)
@@ -146,6 +158,7 @@ class SearchableComboBox(QComboBox):
             self.setCurrentIndex(max(0, min(select, self._source.rowCount() - 1)))
             self._last_data = self.currentData()
         self._sync_edit()
+        self.blockSignals(False)
 
     def add_option(self, label: str, data) -> None:
         item = QStandardItem(label)
@@ -166,8 +179,17 @@ class SearchableComboBox(QComboBox):
         Keeping the box empty and putting the choice in the placeholder removes
         the whole class of problem: typing is always a fresh search, whatever
         the focus history, and the current value is still on screen.
+
+        It also **records the committed row**, whatever brought the combo to it
+        — the popup list, the arrow keys, the completer.  Only
+        :meth:`set_options` and :meth:`_pick_text` used to write
+        ``_last_data``, so choosing a row by clicking it in the popup left the
+        previous row behind as "the committed choice", and
+        :meth:`_restore` put *that* one back on the next focus-out.
         """
         row = self.currentIndex()
+        if 0 <= row < self.count():
+            self._last_data = self.itemData(row)
         text = self.itemText(row) if 0 <= row < self.count() else ""
         self.lineEdit().setText("")
         self.lineEdit().setPlaceholderText(text or "输入以筛选")
@@ -175,17 +197,32 @@ class SearchableComboBox(QComboBox):
     def focusOutEvent(self, event) -> None:
         """Drop an abandoned search instead of leaving the list narrowed.
 
-        Unconditional, including when the completion popup is up: a click there
-        reaches :meth:`_pick_text` *after* this, and that looks its row up by
-        text in the restored (unfiltered) model, so the pick still lands.  The
-        alternative — sitting a narrowed or empty list behind a blurred box —
-        is the worse failure.
+        Reached on every focus-out, including when the completion popup is up:
+        a click there lands in :meth:`_pick_text` *after* this, and that looks
+        its row up by text in the restored (unfiltered) model, so the pick
+        still arrives.  The alternative — sitting a narrowed or empty list
+        behind a blurred box — is the worse failure.  What it does *not* do is
+        move a box nobody was searching in; see :meth:`_restore`.
         """
         super().focusOutEvent(event)
         self._restore()
 
     def _restore(self) -> None:
-        """Snap back to the committed selection and lift the filter."""
+        """Snap back to the committed selection and lift the filter.
+
+        Nothing is abandoned when nothing was typed, so an untouched box is
+        left exactly as it is: **focus alone must never move a filter.**  That
+        is the drift that put the 师 picker back on the country's first
+        division — the popup-list path moved the index without moving
+        ``_last_data``, and the next focus-out (the modal replace dialog
+        taking focus) quietly restored the default row.  The tree did not
+        follow at that moment, because signals are blocked here, so the move
+        only became visible at the *next* refresh — right after an edit.
+        """
+        if not self.lineEdit().text() \
+                and self._proxy.rowCount() == self._source.rowCount():
+            self._sync_edit()
+            return
         self.blockSignals(True)
         self._proxy.setFilterFixedString("")
         row = None
@@ -668,12 +705,13 @@ class MainWindow(QMainWindow):
         self._countries = self.session.countries()
         self._country_of = {c.code: c for c in self._countries}
         total = len(self.session.battalions())
-        self.country_box.blockSignals(True)
+        # ``set_options`` notifies nobody, so the refresh below is explicit and
+        # happens once, on a whole list — the country box used to need its own
+        # ``blockSignals`` wrapper to keep the tree from rebuilding mid-swap.
         self.country_box.set_options(
             [(f"全部国家  ({len(self._countries)} 国 · {len(self._divisions)} 师"
               f" · {total} 营)", None)]
             + [(c.label(), c.code) for c in self._countries])
-        self.country_box.blockSignals(False)
         self._fill_division_box()
 
         self.log.setText("")
