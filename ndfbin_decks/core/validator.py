@@ -5,13 +5,24 @@ plus three mods, then split by whether vanilla itself satisfies the rule.
 
 **Hard errors** (vanilla and all three mods agree, so a violation is a real bug):
 
-* ``Σ(Number) == len(DeckPackList)`` — measured 2208/2208 vanilla, 2266/2266
-  Berlin, 2337/2337 Northern Thunder, 2208/2208 Test.
-  ⚠ The 57 "overruns" seen during recon are all in *skirmish* decks, which the
-  game never indexes; they are not a counter-example.
-* ``PackIndex + Number <= len(DeckPackList)`` — zero violations everywhere.
+* ``sum_neq_pool`` — measured 2208/2208 vanilla, 2266/2266 Berlin, 2337/2337
+  Northern Thunder, 2208/2208 Test.
+* ``pack_index_tiles`` — the ``(PackIndex, Number)`` pairs must tile the slot
+  pool with **no hole and no overlap**.  Measured 13505 decks / 427451 windows
+  across seven files, 0 gaps, 0 overlaps.
+* ``window_out_of_range`` — ``PackIndex + Number <= len(DeckPackList)``.
+  ⚠ Measured **0 violations** across those same 427451 windows.  The 57
+  "overruns" seen during recon are all in *skirmish* decks, which the game never
+  indexes; they are not a counter-example.
 * every platoon referenced by exactly one company — zero orphans everywhere.
 * every ``obj_ref`` in range with a matching ``class_id``.
+
+⚠ **``pack_count`` is not the pool length**, and conflating the two is what made
+``window_out_of_range`` lie: a deck with an unreferenced slot has
+``pack_count == Σ(Number) < len(DeckPackList)``, so a window that fits the file
+perfectly well would be reported as "exceeding the pool" — pointing the reader at
+the wrong thing entirely.  The range check now compares against
+:attr:`~.deckmodel.Battalion.pool_slots`, and the hole has its own rule.
 
 **Soft warnings** (vanilla violates these too, so blocking on them would reject
 official data):
@@ -33,9 +44,10 @@ WARN = "warn"
 
 #: Vanilla agreement, recorded so a future threshold change can be audited.
 CALIBRATION = {
-    "sum_equals_pool": "2208/2208 vanilla, 2266/2266 Berlin, "
-                       "2337/2337 N.Thunder, 2208/2208 Test",
-    "window_in_range": "0 violations in all four",
+    "sum_neq_pool": "2208/2208 vanilla, 2266/2266 Berlin, "
+                    "2337/2337 N.Thunder, 2208/2208 Test",
+    "pack_index_tiles": "0 gaps / 0 overlaps in 13505 decks, 427451 windows",
+    "window_in_range": "0 violations in all seven files",
     "no_orphan_platoon": "0 orphans in all four",
     "hq_per_company": "vanilla itself has 68 companies with != 1 -> warning only",
 }
@@ -73,10 +85,19 @@ def validate_battalion(bat: Battalion, group_rules: dict | None = None) -> list[
     if total != pool:
         out.append(Issue(
             ERROR, "sum_neq_pool",
-            f"Σ(Number)={total} but the pool holds {pool} slots",
+            f"Σ(Number)={total}, but the windows only resolve {pool} slot(s) "
+            f"inside the {bat.pool_slots or pool}-slot pool",
             where))
 
     seen_platoons: Counter[int] = Counter()
+    #: ``len(DeckPackList)``.  Falls back to ``pack_count`` for a hand-built
+    #: Battalion that never went through ``_build`` — in a well-formed deck the
+    #: two are equal, so the fallback cannot mask anything but damage.
+    slots = bat.pool_slots or pool
+    #: Running end of the windows seen so far, in deck → company → platoon →
+    #: entry order.  W4 makes this the *only* legal value for the next
+    #: ``PackIndex``, so it is also the yardstick for finding holes.
+    run = 0
     for c in bat.companies:
         for p in c.platoons:
             # Counted once per platoon, not once per window: a platoon may
@@ -92,11 +113,34 @@ def validate_battalion(bat: Battalion, group_rules: dict | None = None) -> list[
                         ERROR, "bad_count",
                         f"Number is {w.count}, must be >= 1",
                         f"{where}/{c.index}/{p.index}"))
-                if w.end > pool:
+                if w.end > slots:
                     out.append(Issue(
                         ERROR, "window_out_of_range",
-                        f"window {w} exceeds the {pool}-slot pool",
+                        f"window {w} exceeds the {slots}-slot pool "
+                        f"(it reaches slot {w.end - 1})",
                         f"{where}/{c.index}/{p.index}"))
+                # W2/W4 — the pairs must *tile* the pool.  A hole is the one
+                # layout defect that used to surface as "exceeds the pool"
+                # while nothing was actually out of range: an unreferenced slot
+                # pushes every later window one place along, so the last one
+                # runs past the end of what the windows cover.
+                if w.pack_index > run:
+                    n = w.pack_index - run
+                    out.append(Issue(
+                        ERROR, "pool_gap",
+                        f"{n} slot(s) {run}..{w.pack_index - 1} belong to no "
+                        f"platoon; every window after them is shifted {n} "
+                        f"slot(s) late ({w} starts at {w.pack_index})",
+                        f"{where}/{c.index}/{p.index}"))
+                elif w.pack_index < run:
+                    n = run - w.pack_index
+                    out.append(Issue(
+                        ERROR, "pool_overlap",
+                        f"window {w} starts at {w.pack_index}, but the windows "
+                        f"before it already reach slot {run - 1}: {n} slot(s) "
+                        f"claimed twice",
+                        f"{where}/{c.index}/{p.index}"))
+                run = max(run, w.end)
                 # W3 — a window means "N units of *this* pack", so every slot it
                 # covers must hold the same one.  Measured 0 violations in
                 # 70300 vanilla windows.  This is a hard error rather than a

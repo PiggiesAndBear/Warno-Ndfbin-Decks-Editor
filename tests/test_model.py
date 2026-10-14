@@ -23,6 +23,7 @@ from _env import (BERLIN as BERLIN_MOD, NORTHERN_THUNDER,  # noqa: E402
                   TEST as TEST_MOD, mod_dir)
 from ndfbin_decks.core import validator                # noqa: E402
 from ndfbin_decks.core.deckmodel import DeckFile       # noqa: E402
+from ndfbin_decks.edit.quantity import Retiler         # noqa: E402
 
 TEST = mod_dir(TEST_MOD)
 BERLIN = mod_dir(BERLIN_MOD)
@@ -117,6 +118,98 @@ def main() -> int:
                 for e in pl.entries[:3]:
                     print(f"        slot{e.slot:>4d} {e.label()}"
                           f"{'  (shared)' if e.shared else ''}")
+
+    # -- the layout rules real data never trips ----------------------------
+    #
+    # 13505 decks / 427451 windows contain zero holes and zero overlaps, so the
+    # two rules above are never exercised by the loop.  A rule that never fires
+    # is indistinguishable from a typo, so each is run against a deliberately
+    # damaged deck.  The damage is injected in memory; nothing is written.
+    print()
+    print("-- layout damage injected on purpose --")
+    if p.is_file():
+
+        def holds(label: str, ok: bool, detail: str = "") -> None:
+            nonlocal failures
+            if ok:
+                print(f"    OK    {label}")
+            else:
+                failures += 1
+                print(f"    FAIL  {label}  {detail}")
+
+        def fresh():
+            return DeckFile(p)
+
+        def shift_pairs(deck, bat, *, at: int, delta: int) -> None:
+            """Move every window starting at or after ``at`` by ``delta``."""
+            ids = {pl.object_id for c in bat.companies for pl in c.platoons}
+            for o in deck.info["objects"]:
+                if o["id"] not in ids:
+                    continue
+                props = {x["property_name"]: x["value"] for x in o["properties"]}
+                for item in props.get("PackIndexUnitNumberList", {}).get("items", []):
+                    key = item.get("key", {})
+                    if isinstance(key.get("value"), int) and key["value"] >= at:
+                        key["value"] += delta
+
+        def pool_items(deck, bat):
+            obj = deck._by_id[bat.deck_object_id]
+            props = {x["property_name"]: x["value"] for x in obj["properties"]}
+            return props["DeckPackList"]["items"]
+
+        def codes_of(deck, name="Descriptor_Deck_pion_SOV_1GTA_595Reco"):
+            return Counter(i.code for i in
+                           validator.validate_battalion(deck.find(name)))
+
+        NAME = "Descriptor_Deck_pion_SOV_1GTA_595Reco"
+
+        # (a) a hole: one slot nothing refers to, everything after it late by 1
+        d = fresh()
+        bat = d.find(NAME)
+        items = pool_items(d, bat)
+        items.insert(3, dict(items[3]))
+        shift_pairs(d, bat, at=3, delta=1)
+        d.invalidate()
+        got = codes_of(d)
+        holds("a hole is reported as a hole", got.get("pool_gap") == 1, str(dict(got)))
+        holds("the hole is NOT called 'out of range'",
+              "window_out_of_range" not in got, str(dict(got)))
+        holds("a pure hole does not trip the Σ rule",
+              "sum_neq_pool" not in got, str(dict(got)))
+        gap = next(i for i in validator.validate_battalion(d.find(NAME))
+                   if i.code == "pool_gap")
+        holds("the hole message names the unreferenced slot",
+              "3..3" in gap.message, gap.message)
+        # Reported at the *first* window that starts late (连0/排1, the one that
+        # would have begun at slot 3) rather than at the tail window it also
+        # pushes past the end — the first is where the reader should look.
+        holds("the hole is reported at the first window that starts late",
+              gap.where.endswith("/0/1"), gap.where)
+
+        # (b) an overlap: one window starts one place early
+        d2 = fresh()
+        bat2 = d2.find(NAME)
+        shift_pairs(d2, bat2, at=3, delta=-1)
+        d2.invalidate()
+        got2 = codes_of(d2)
+        holds("an overlap is reported as an overlap",
+              got2.get("pool_overlap") == 1, str(dict(got2)))
+        holds("an overlap is not called 'out of range'",
+              "window_out_of_range" not in got2, str(dict(got2)))
+
+        # (c) the remedy: any edit routed through relay re-lays the deck
+        b3 = d.find(NAME)
+        co, pl = b3.companies[-1], b3.companies[-1].platoons[-1]
+        w = pl.windows[-1]
+        laid = Retiler(d).set_count(b3.deck_object_id, len(b3.companies) - 1,
+                                    len(co.platoons) - 1, len(pl.windows) - 1,
+                                    w.count)
+        d.invalidate()
+        healed = validator.validate_battalion(d.find(NAME))
+        holds("relay heals the hole", laid.ok and not healed, str([i.code for i in healed]))
+        holds("the healed deck's pool is back to Σ(Number)",
+              d.find(NAME).pack_count == d.find(NAME).pool_slots == 103,
+              f"{d.find(NAME).pack_count} / {d.find(NAME).pool_slots}")
 
     print()
     if failures:

@@ -1224,8 +1224,7 @@ class MainWindow(QMainWindow):
         v = s.validate()
         if v.errors:
             QMessageBox.critical(
-                self, tr("有硬错误，不能保存"),
-                "\n".join(i.message for i in v.errors[:5]))
+                self, tr("有硬错误，不能保存"), self._error_report(v))
             return
         target, _ = QFileDialog.getSaveFileName(
             self, tr("保存到"), str(s.path), "Deck.ndfbin (*.ndfbin)")
@@ -1242,6 +1241,55 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             return
         QMessageBox.information(self, tr("已保存"), tr("{target}\n{v1:,} 字节", target=target, v1=len(data)))
+
+    #: Findings spelled out in full before the report switches to a summary.
+    #: A single damaged deck can produce dozens; listing them all buries the
+    #: one line the reader needs.
+    _ERRORS_SHOWN = 5
+
+    @staticmethod
+    def _deck_name(where: str) -> str:
+        """``Descriptor_Deck_X/3/1`` → ``X``."""
+        name = where.split("/")[0]
+        return name[len("Descriptor_Deck_"):] if name.startswith("Descriptor_Deck_") else name
+
+    def _where_label(self, where: str) -> str:
+        """``Descriptor_Deck_X/3/1`` → ``X · 连3/排1``.
+
+        The validator's ``where`` already carries the deck, company and platoon
+        an issue belongs to; it was simply never shown.  Rendered with the
+        tree's own vocabulary so the reader can go straight to that node.
+        """
+        parts = where.split("/")
+        name = self._deck_name(where)
+        if len(parts) >= 3:
+            return tr("{v1} · 连{v2}/排{v3}", v1=name, v2=parts[1], v3=parts[2])
+        if len(parts) == 2:
+            return tr("{v1} · 连{v2}", v1=name, v2=parts[1])
+        return name
+
+    def _error_report(self, v) -> str:
+        """Message body for a refused save: what, where, and how much.
+
+        ``on_save`` blocks the whole file on any hard error, so the two things
+        the reader needs are *which deck* to go and repair and *how many* others
+        are waiting behind it.  Neither was in the old dialog, which printed
+        bare messages and stopped at five.
+        """
+        lines = [f"{i.message}\n    — {self._where_label(i.where)}" if i.where
+                 else i.message
+                 for i in v.errors[:self._ERRORS_SHOWN]]
+        if len(v.errors) > self._ERRORS_SHOWN:
+            lines.append(tr("…另有 {v1} 条未显示", v1=len(v.errors) - self._ERRORS_SHOWN))
+
+        decks = sorted({self._deck_name(i.where) for i in v.errors if i.where})
+        body = "\n".join(lines)
+        body += "\n\n" + tr("共 {v1} 条硬错误，涉及 {v2} 个营：",
+                            v1=len(v.errors), v2=len(decks))
+        body += "\n" + "\n".join(decks[:self._ERRORS_SHOWN])
+        if len(decks) > self._ERRORS_SHOWN:
+            body += "\n" + tr("…等 {v1} 个", v1=len(decks))
+        return body
 
     # -- helpers ----------------------------------------------------------
 

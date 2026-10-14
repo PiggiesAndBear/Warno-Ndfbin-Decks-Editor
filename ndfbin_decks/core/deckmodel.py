@@ -150,6 +150,8 @@ class Battalion:
     identifier: str = ""
     division: str | None = None
     companies: list[Company] = field(default_factory=list)
+    #: ``len(DeckPackList)`` — how long the slot pool actually is.
+    pool_slots: int = 0
     #: filled by provenance: Origin value or None when not classified
     origin: str | None = None
 
@@ -160,7 +162,13 @@ class Battalion:
 
     @property
     def pack_count(self) -> int:
-        """``len(DeckPackList)`` — the pool every window indexes into."""
+        """How many slots the platoons actually claim.
+
+        Not the same as :attr:`pool_slots` once a deck is damaged: a slot no
+        platoon refers to is in the pool and not here, and a slot two platoons
+        both claim is here twice.  The two agreeing *is* the well-formed case
+        (W4), which is why they are kept apart rather than conflated.
+        """
         return sum(len(p.entries) for c in self.companies for p in c.platoons)
 
     @property
@@ -299,16 +307,19 @@ class DeckFile:
     def _build(self, deck_obj: dict) -> Battalion:
         props = self._props(deck_obj)
         export = self.info["exports"].get(deck_obj["id"], "").rsplit("/", 1)[-1]
+
+        # DeckPackList is the shared slot pool; window indices point into it.
+        pool = [r.get("object_id") for r in
+                (props.get("DeckPackList", {}).get("items", []) or [])]
+
         bat = Battalion(
             deck_object_id=deck_obj["id"],
             export_name=export,
             identifier=self._str(props, "DeckIdentifier"),
             division=self._str(props, "DeckDivision") or None,
+            pool_slots=len(pool),
         )
 
-        # DeckPackList is the shared slot pool; window indices point into it.
-        pool = [r.get("object_id") for r in
-                (props.get("DeckPackList", {}).get("items", []) or [])]
         used_by: dict[int, int] = {}
         for pid in pool:
             if pid is not None:

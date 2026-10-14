@@ -1223,6 +1223,51 @@ def main() -> int:
         check("save succeeded", False, repr(exc))
 
     print()
+    print("=== 12b. a refused save names the deck, and says how many ===")
+    # A user reported this dialog and could not act on it: it listed bare
+    # messages, so it said *what* was wrong without saying *which deck* — the
+    # one thing needed to go and look.  Damaged in memory, never written.
+    deck = win.session.deck
+    NAME = "Descriptor_Deck_pion_SOV_1GTA_595Reco"
+    target = deck.find(NAME)
+    props = {p["property_name"]: p["value"]
+             for p in deck._by_id[target.deck_object_id]["properties"]}
+    props["DeckPackList"]["items"].insert(3, dict(props["DeckPackList"]["items"][3]))
+    ids = {pl.object_id for c in target.companies for pl in c.platoons}
+    for o in deck.info["objects"]:
+        if o["id"] not in ids:
+            continue
+        pr = {p["property_name"]: p["value"] for p in o["properties"]}
+        for item in pr.get("PackIndexUnitNumberList", {}).get("items", []):
+            key = item.get("key", {})
+            if isinstance(key.get("value"), int) and key["value"] >= 3:
+                key["value"] += 1
+    deck.invalidate()
+
+    shown.clear()
+    win.on_save()
+    kind, body = shown[-1] if shown else ("", "")
+    check("an unsaveable file is refused", kind == "error", str(shown[-1:]))
+    check("and the dialog names the deck that needs repair",
+          "pion_SOV_1GTA_595Reco" in body, body[:100])
+    check("and it says where inside the deck",
+          "连0/排1" in body, body[:200])
+    check("and it counts the errors and the decks",
+          "共 1 条硬错误" in body and "涉及 1 个营" in body, body[-160:])
+
+    # The remedy the dialog is implicitly asking for: any relay-routed edit
+    # re-lays the deck into the one legal layout.
+    b = deck.find(NAME)
+    pl = b.companies[-1].platoons[-1]
+    win.session.retiler.set_count(b.deck_object_id, len(b.companies) - 1,
+                                  len(b.companies[-1].platoons) - 1,
+                                  len(pl.windows) - 1, pl.windows[-1].count)
+    deck.invalidate()
+    check("and a relay edit on that deck clears it, so saving can proceed",
+          not win.session.validate().errors,
+          str([i.code for i in win.session.validate().errors]))
+
+    print()
     print("=== 13. guards in the UI layer ===")
     # back to the stub: a real modal would block headless forever
     gui_mod.SwapDialog = _AutoPick

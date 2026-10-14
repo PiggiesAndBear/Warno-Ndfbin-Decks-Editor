@@ -261,5 +261,10 @@
   "只影响这个列表看得见什么，不影响已勾选的装备。\n匹配整行文字：装备名、运输载具、经验等级都算。": "Only changes what this list shows, never what is ticked.\nMatches the whole line: equipment, transporter, experience.",
   "勾选当前列表里看得见的全部装备（搜索有筛选时只勾可见的）": "Tick every kind the list is showing (with a search on, only the visible ones)",
   "取消全部勾选，包括被搜索隐藏的": "Untick everything, including rows the search is hiding",
-  "筛选出 {v0} / {v1} 种，已勾选 {v2} 种": "Showing {v0} / {v1} kinds, {v2} ticked"
+  "筛选出 {v0} / {v1} 种，已勾选 {v2} 种": "Showing {v0} / {v1} kinds, {v2} ticked",
+  "…另有 {v1} 条未显示": "…and {v1} more not shown",
+  "共 {v1} 条硬错误，涉及 {v2} 个营：": "{v1} hard error(s) across {v2} deck(s):",
+  "…等 {v1} 个": "…and {v1} more",
+  "{v1} · 连{v2}/排{v3}": "{v1} · company {v2} / platoon {v3}",
+  "{v1} · 连{v2}": "{v1} · company {v2}"
 }
