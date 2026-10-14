@@ -61,8 +61,10 @@ from ..io import divisions, modlocator
 from .replace_dialog import ReplaceDialog
 from .session import Session, open_mod
 from .swap_dialog import SwapDialog
+from .. import i18n
+from ..i18n import live, qt_builtin, settings, tr
 
-HEADERS = ("条目", "连Co", "排Pl", "装备", "运输", "经验", "件数", "槽位", "pack#")
+HEADERS = live(globals(), "HEADERS", lambda: (tr("条目"), tr("连Co"), tr("排Pl"), tr("装备"), tr("运输"), tr("经验"), tr("件数"), tr("槽位"), "pack#"))
 COLUMNS = len(HEADERS)
 
 #: How many battalions a "search everywhere" may show.  2208 of them would
@@ -192,7 +194,7 @@ class SearchableComboBox(QComboBox):
             self._last_data = self.itemData(row)
         text = self.itemText(row) if 0 <= row < self.count() else ""
         self.lineEdit().setText("")
-        self.lineEdit().setPlaceholderText(text or "输入以筛选")
+        self.lineEdit().setPlaceholderText(text or tr("输入以筛选"))
 
     def focusOutEvent(self, event) -> None:
         """Drop an abandoned search instead of leaving the list narrowed.
@@ -376,7 +378,7 @@ class EntryTable(QTableWidget):
             trans = (session.display(key.transporter)
                      if key and key.transporter else "—")
             xp = (str(key.experience) if key and key.experience is not None
-                  else "继承")
+                  else tr("继承"))
             slots = (f"{start}-{start + count - 1}" if count > 1
                      else str(start))
             cells = (f"#{ei + 1}", f"Co{ci}", f"Pl{si}", unit, trans, xp,
@@ -385,12 +387,10 @@ class EntryTable(QTableWidget):
                 item = QTableWidgetItem(text)
                 if col == 0:
                     item.setData(Qt.UserRole, (ci, si, ei))
-                if col == 5 and xp == "继承":
+                if col == 5 and xp == tr("继承"):
                     item.setForeground(QBrush(QColor(120, 120, 120)))
                 if col == 7:
-                    item.setToolTip(f"占 {count} 个槽位，"
-                                    f"全部必须是同"
-                                    f"一装备")
+                    item.setToolTip(tr("占 {count} 个槽位，全部必须是同一装备", count=count))
                 self.setItem(row, col, item)
         self.resizeColumnsToContents()
 
@@ -452,8 +452,40 @@ class MainWindow(QMainWindow):
         self._country_of: dict[str, object] = {}
         #: combo item key -> resolved ModPaths (a hand-opened mod lives only here)
         self._mod_index: dict[str, modlocator.ModPaths] = {}
+        #: ``retranslate()`` replays these; see the note on that method
+        self._retranslaters: list = []
         self._build()
         self._refresh_mods()
+
+    def _rt(self, fn) -> None:
+        """Set a piece of static text now, and remember how to set it again.
+
+        Every label in this window is registered rather than merely assigned,
+        so switching language is a matter of replaying the same ``tr()`` calls
+        instead of rebuilding the window — which would throw away unsaved work.
+        """
+        self._retranslaters.append(fn)
+        fn()
+
+    def retranslate(self) -> None:
+        """Re-run every static text call, then refresh what is derived."""
+        for fn in self._retranslaters:
+            fn()
+        # Text built from the open file — battalion names, the counters, the
+        # log line — comes out of a fresh pass rather than a second copy of the
+        # rules that produced it.
+        if self.session is not None:
+            self._fill_tree()
+            self._refresh_mods()
+
+    def on_language(self, index: int) -> None:
+        code = self.lang_box.itemData(index)
+        if not code or code == i18n.language():
+            return
+        i18n.set_language(code)
+        qt_builtin.install(QApplication.instance(), code)
+        settings.save_language(code)
+        self.retranslate()
 
     # -- layout -----------------------------------------------------------
 
@@ -469,17 +501,23 @@ class MainWindow(QMainWindow):
         left_col = QVBoxLayout(left)
         left_col.setContentsMargins(0, 0, 0, 0)
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["师Div / 营Bn / 连Co / 排Pl"])
+        self._rt(lambda: self.tree.setHeaderLabels(
+            [tr("师Div / 营Bn / 连Co / 排Pl")]))
         self.tree.setAlternatingRowColors(True)
         self.tree.setSelectionMode(QAbstractItemView.SingleSelection)
-        left_col.addWidget(QLabel("组织"))
+        self.org_label = QLabel()
+        self._rt(lambda: self.org_label.setText(tr("组织")))
+        left_col.addWidget(self.org_label)
         left_col.addWidget(self.tree, 1)
         split.addWidget(left)
 
         right = QWidget()
         right_col = QVBoxLayout(right)
         right_col.setContentsMargins(0, 0, 0, 0)
-        right_col.addWidget(QLabel("装备条目（一行 = 一个窗口，整行同时换装）"))
+        self.entries_label = QLabel()
+        self._rt(lambda: self.entries_label.setText(
+            tr("装备条目（一行 = 一个窗口，整行同时换装）")))
+        right_col.addWidget(self.entries_label)
         self.table = EntryTable()
         right_col.addWidget(self.table, 1)
         split.addWidget(right)
@@ -512,40 +550,60 @@ class MainWindow(QMainWindow):
         row.addWidget(QLabel("Mod"))
         self.mod_box = QComboBox()
         self.mod_box.setMinimumWidth(150)
-        self.mod_box.setToolTip(
-            "本机 Saved Games 工作区 + Steam 创意工坊的 mod。\n"
-            "找不到时用右边的「打开 mod 文件夹」手动指定。")
+        self._rt(lambda: self.mod_box.setToolTip(
+            tr("本机 Saved Games 工作区 + Steam 创意工坊的 mod。\n"
+            "找不到时用右边的「打开 mod 文件夹」手动指定。")))
         row.addWidget(self.mod_box, 1)
 
-        self.open_folder_btn = QPushButton("打开 mod 文件夹")
-        self.open_folder_btn.setToolTip(
-            "手动指定 Mod 部署目录（兜底）。\n"
+        self.open_folder_btn = QPushButton()
+        self._rt(lambda: self.open_folder_btn.setText(tr("打开 mod 文件夹")))
+        self._rt(lambda: self.open_folder_btn.setToolTip(
+            tr("手动指定 Mod 部署目录（兜底）。\n"
             "可以选一个 mod 文件夹，也可以选装着多个 mod 的父目录 ——\n"
-            "Steam 库目录、Saved Games 工作区、整包解压出来的文件夹都行。")
+            "Steam 库目录、Saved Games 工作区、整包解压出来的文件夹都行。")))
         self.open_folder_btn.clicked.connect(self.on_open_folder)
         row.addWidget(self.open_folder_btn)
 
-        row.addWidget(QLabel("国家 Nat"))
+        self.country_label = QLabel()
+        self._rt(lambda: self.country_label.setText(tr("国家 Nat")))
+        row.addWidget(self.country_label)
         self.country_box = SearchableComboBox()
         self.country_box.setMinimumWidth(230)
-        self.country_box.setToolTip(
-            "按师的前缀（SOV / RFA / RDA… ）筛选，师名为 RDA 的即东德 ——\n"
-            "输入 DDR / USSR 这类别名也能命中。选完国家后右边的师列表只剩它。")
+        self._rt(lambda: self.country_box.setToolTip(
+            tr("按师的前缀（SOV / RFA / RDA… ）筛选，师名为 RDA 的即东德 ——\n"
+            "输入 DDR / USSR 这类别名也能命中。选完国家后右边的师列表只剩它。")))
         row.addWidget(self.country_box)
 
-        row.addWidget(QLabel("师 Div"))
+        self.div_label = QLabel()
+        self._rt(lambda: self.div_label.setText(tr("师 Div")))
+        row.addWidget(self.div_label)
         self.div_box = SearchableComboBox()
         self.div_box.setMinimumWidth(280)
-        self.div_box.setToolTip(
-            "本 mod 的师；营按 DeckDivision 归属。\n"
-            "直接输入字符即可缩小列表，例如 SOV_TK / 12Pz / 27GMRD")
+        self._rt(lambda: self.div_box.setToolTip(
+            tr("本 mod 的师；营按 DeckDivision 归属。\n"
+            "直接输入字符即可缩小列表，例如 SOV_TK / 12Pz / 27GMRD")))
         row.addWidget(self.div_box, 1)
 
-        row.addWidget(QLabel("营搜索"))
+        self.bn_label = QLabel()
+        self._rt(lambda: self.bn_label.setText(tr("营搜索")))
+        row.addWidget(self.bn_label)
         self.bn_search = QLineEdit()
-        self.bn_search.setPlaceholderText("营名，例如 pion / TK / 11Sq")
+        self._rt(lambda: self.bn_search.setPlaceholderText(
+            tr("营名，例如 pion / TK / 11Sq")))
         self.bn_search.setMinimumWidth(200)
         row.addWidget(self.bn_search, 1)
+
+        # No label: the items name themselves in their own language, which is
+        # the one control that must stay readable whatever is selected.
+        self.lang_box = QComboBox()
+        self.lang_box.setMinimumWidth(120)
+        self._rt(lambda: self.lang_box.setToolTip(tr("界面语言")))
+        for code, label in i18n.available():
+            self.lang_box.addItem(label, code)
+        self.lang_box.setCurrentIndex(
+            max(self.lang_box.findData(i18n.language()), 0))
+        self.lang_box.currentIndexChanged.connect(self.on_language)
+        row.addWidget(self.lang_box)
         return bar
 
     def _build_actions(self) -> QWidget:
@@ -553,22 +611,23 @@ class MainWindow(QMainWindow):
         row = QHBoxLayout(bar)
         row.setContentsMargins(0, 0, 0, 0)
 
-        self.info = QLabel("选一个 mod 开始")
+        self.info = QLabel()
+        self._rt(lambda: self.info.setText(tr("选一个 mod 开始")))
         self.info.setWordWrap(True)
         row.addWidget(self.info, 1)
+        self._action_buttons: list = []
 
-        for text, slot, tip in (
-            ("改件数", self.on_set_count, "修改选中条目的件数（整营自动重排槽位）"),
-            ("换装备", self.on_swap, "把选中槽位换成别的装备"),
-            ("插入条目", self.on_insert, "在选中排里加一条装备"),
-            ("删除条目", self.on_remove, "删掉选中排里的一条装备"),
-            ("批量替换", self.on_replace, "按 师/营/连/排 层级批量换装备"),
-            ("保存", self.on_save, "写回 Deck.ndfbin（先备份）"),
-        ):
-            btn = QPushButton(text)
-            btn.setToolTip(tip)
+        # Written out rather than looped over a table of labels: ``tr()`` has to
+        # be called *inside* the stored lambda, or a language switch would just
+        # re-apply whatever the build-time call returned.  That also keeps every
+        # key visible to ``tools/i18n_sync.py``, which reads source, not runtime.
+        for slot in (self.on_set_count, self.on_swap, self.on_insert,
+                     self.on_remove, self.on_replace, self.on_save):
+            btn = QPushButton()
             btn.clicked.connect(slot)
             row.addWidget(btn)
+            self._action_buttons.append((btn, slot))
+        self._rt(self._label_actions)
 
         # The title bar carries the tagline, so the window itself is where the
         # product name has to appear — otherwise nothing on screen says what
@@ -578,6 +637,21 @@ class MainWindow(QMainWindow):
         stamp.setStyleSheet("color: palette(mid);")
         row.addWidget(stamp)
         return bar
+
+    def _label_actions(self) -> None:
+        labels = {
+            self.on_set_count: (tr("改件数"),
+                                tr("修改选中条目的件数（整营自动重排槽位）")),
+            self.on_swap: (tr("换装备"), tr("把选中槽位换成别的装备")),
+            self.on_insert: (tr("插入条目"), tr("在选中排里加一条装备")),
+            self.on_remove: (tr("删除条目"), tr("删掉选中排里的一条装备")),
+            self.on_replace: (tr("批量替换"), tr("按 师/营/连/排 层级批量换装备")),
+            self.on_save: (tr("保存"), tr("写回 Deck.ndfbin（先备份）")),
+        }
+        for btn, slot in self._action_buttons:
+            text, tip = labels[slot]
+            btn.setText(text)
+            btn.setToolTip(tip)
 
     # -- mods -------------------------------------------------------------
 
@@ -601,13 +675,14 @@ class MainWindow(QMainWindow):
         # A placeholder keeps index 0 from being a real mod: without it, the
         # first mod is already "current", so picking it changes no index, emits
         # no signal and silently loads nothing.
-        self.mod_box.addItem("— 选择 mod —", None)
+        self.mod_box.addItem(tr("— 选择 mod —"), None)
         for mod in mods:
             self._add_mod_item(mod)
         self.mod_box.blockSignals(False)
         self.info.setText(
-            f"发现 {len(mods)} 个 mod（本机 + 创意工坊）—— 选一个开始；"
-            f"找不到就用「打开 mod 文件夹」")
+            tr("发现 {v0} 个 mod（本机 + 创意工坊）—— 选一个开始；找不到就用「打开 mod 文件夹」",
+                v0=len(mods),
+            ))
 
     def _add_mod_item(self, mod: modlocator.ModPaths) -> None:
         """Append one mod, greyed out when it has no compiled deck.
@@ -623,7 +698,7 @@ class MainWindow(QMainWindow):
             has = False
         label = f"{mod.label}  · {mod.source_label}"
         if not has:
-            label += "（无牌组）"
+            label += tr("（无牌组）")
         # Data stays the directory name when possible so a plain
         # ``findData("Test")`` keeps working; a name already taken (two mods
         # called the same thing from two sources) falls back to the id.
@@ -647,20 +722,21 @@ class MainWindow(QMainWindow):
         one dialog, and none of them require the editor to guess.
         """
         chosen = QFileDialog.getExistingDirectory(
-            self, "选择 Mod 部署目录（含 Gen/NDF/GFX/Deck.ndfbin 的那一层）",
+            self, tr("选择 Mod 部署目录（含 Gen/NDF/GFX/Deck.ndfbin 的那一层）"),
             str(modlocator.deploy_root()))
         if not chosen:
             return
         try:
             found = modlocator.discover_in_folder(Path(chosen))
         except Exception as exc:                           # noqa: BLE001
-            QMessageBox.warning(self, "读取失败", str(exc))
+            QMessageBox.warning(self, tr("读取失败"), str(exc))
             return
         if not found:
             QMessageBox.information(
-                self, "没找到 mod",
-                f"{chosen}\n\n里面没有 mod：既不是含 Gen/ 或 Config.ini 的 "
-                f"mod 目录，子目录里也没有这样的 mod。")
+                self, tr("没找到 mod"),
+                tr("{chosen}\n\n里面没有 mod：既不是含 Gen/ 或 Config.ini 的 mod 目录，子目录里也没有这样的 mod。",
+                    chosen=chosen,
+                ))
             return
         added: list[str] = []
         first_loadable: str | None = None
@@ -679,11 +755,12 @@ class MainWindow(QMainWindow):
         self.mod_box.blockSignals(False)
         if not added:
             QMessageBox.information(
-                self, "已经在列表里", f"这个目录里的 {len(found)} 个 mod "
-                f"都已在下拉列表中，无需重复添加。")
+                self, tr("已经在列表里"), tr("这个目录里的 {v0} 个 mod 都已在下拉列表中，无需重复添加。",
+                    v0=len(found),
+                ))
             return
         self.info.setText(
-            f"已从 {chosen} 加入 {len(added)} 个 mod："
+            tr("已从 {chosen} 加入 {v1} 个 mod：", chosen=chosen, v1=len(added))
             + "、".join(added[:4]) + ("…" if len(added) > 4 else ""))
         if first_loadable is not None:
             index = self.mod_box.findData(first_loadable)
@@ -698,7 +775,7 @@ class MainWindow(QMainWindow):
         try:
             self.session = open_mod(mod)
         except Exception as exc:                       # noqa: BLE001
-            QMessageBox.critical(self, "打开失败", f"{exc}")
+            QMessageBox.critical(self, tr("打开失败"), f"{exc}")
             traceback.print_exc()
             return
         self._divisions = self.session.divisions()
@@ -709,16 +786,22 @@ class MainWindow(QMainWindow):
         # happens once, on a whole list — the country box used to need its own
         # ``blockSignals`` wrapper to keep the tree from rebuilding mid-swap.
         self.country_box.set_options(
-            [(f"全部国家  ({len(self._countries)} 国 · {len(self._divisions)} 师"
-              f" · {total} 营)", None)]
+            [(tr("全部国家  ({v0} 国 · {v1} 师 · {total} 营)",
+                v0=len(self._countries),
+                v1=len(self._divisions),
+                total=total,
+            ), None)]
             + [(c.label(), c.code) for c in self._countries])
         self._fill_division_box()
 
         self.log.setText("")
         cat = self.session.get_catalogue()
         self.info.setText(
-            f"{len(self._divisions)} 个师 · {len(self.session.battalions())} 个营"
-            f" · {cat.stats.summary()}")
+            tr("{v0} 个师 · {v1} 个营 · {v2}",
+                v0=len(self._divisions),
+                v1=len(self.session.battalions()),
+                v2=cat.stats.summary(),
+            ))
         self._fill_tree()
         # Warm the unit universe *after* the tree is up, so the window stays
         # usable while the 27 MB baseline inside ``base.zip`` — and, for a mod
@@ -731,7 +814,10 @@ class MainWindow(QMainWindow):
             units = None
         if units is not None:
             self.info.setText(self.info.text()
-                              + f" · 可定义单位 {len(units)} 个（{units.summary()}）")
+                              + tr(" · 可定义单位 {v0} 个（{v1}）",
+                                  v0=len(units),
+                                  v1=units.summary(),
+                              ))
 
     def current_country(self):
         """The selected :class:`~ndfbin_decks.app.session.Country`, or ``None``."""
@@ -758,11 +844,11 @@ class MainWindow(QMainWindow):
         """
         country = self.current_country()
         scope = country.divisions if country is not None else self._divisions
-        label = (f"全部师（{country.code} · {len(scope)} 师）" if country is not None
-                 else f"全部师（{len(scope)} 师）")
+        label = (tr("全部师（{code} · {v1} 师）", code=country.code, v1=len(scope)) if country is not None
+                 else tr("全部师（{v0} 师）", v0=len(scope)))
         self.div_box.set_options(
             [(label, None)]
-            + [(f"{d.label}  ({len(d)} 营)", d.path) for d in scope],
+            + [(tr("{label}  ({v1} 营)", label=d.label, v1=len(d)), d.path) for d in scope],
             select=1 if len(scope) > 1 else 0)
 
     # -- tree -------------------------------------------------------------
@@ -804,12 +890,12 @@ class MainWindow(QMainWindow):
         if division is not None:
             label = division.label
         elif country is not None:
-            label = f"{country.code} 全国 · {country.name}"
+            label = tr("{code} 全国 · {name}", code=country.code, name=country.name)
         else:
-            label = "全部师"
+            label = tr("全部师")
 
         root = QTreeWidgetItem(
-            self.tree, [f"师Div {label}  ({len(self._matching_battalions())} 营)"])
+            self.tree, [tr("师Div {label}  ({v1} 营)", label=label, v1=len(self._matching_battalions()))])
         root.setData(0, Qt.UserRole, NodeRole("div", division=path))
         root.setExpanded(True)
 
@@ -818,8 +904,11 @@ class MainWindow(QMainWindow):
             node.setData(0, Qt.UserRole,
                          NodeRole("bn", division=b.division,
                                   deck_id=b.deck_object_id))
-            node.setToolTip(0, f"{b.export_name}\n师：{b.division or '—'}"
-                               f"\n{len(b.companies)} 个连")
+            node.setToolTip(0, tr("{export_name}\n师：{v1}\n{v2} 个连",
+                export_name=b.export_name,
+                v1=b.division or '—',
+                v2=len(b.companies),
+            ))
             for ci, c in enumerate(b.companies):
                 cn = QTreeWidgetItem(node, [self._co_label(b, ci, c)])
                 cn.setData(0, Qt.UserRole,
@@ -835,13 +924,16 @@ class MainWindow(QMainWindow):
                     pn.setToolTip(0, " ".join(str(w) for w in p.windows))
                     for ei, w in enumerate(p.windows):
                         en = QTreeWidgetItem(pn, [
-                            f"#{ei} {self._entry_label(b, w)}  "
-                            f"槽位{list(w.slots())}"])
+                            tr("#{ei} {v1}  槽位{v2}",
+                                ei=ei,
+                                v1=self._entry_label(b, w),
+                                v2=list(w.slots()),
+                            )])
                         en.setData(0, Qt.UserRole,
                                    NodeRole("entry", division=b.division,
                                             deck_id=b.deck_object_id,
                                             ci=ci, si=si, ei=ei))
-                        en.setToolTip(0, f"占槽位 {list(w.slots())}，{w.count} 队")
+                        en.setToolTip(0, tr("占槽位 {v0}，{count} 队", v0=list(w.slots()), count=w.count))
         self.tree.expandToDepth(1)
 
     # -- labels -----------------------------------------------------------
@@ -850,18 +942,18 @@ class MainWindow(QMainWindow):
         name = b.export_name
         if name.startswith("Descriptor_Deck_"):
             name = name[len("Descriptor_Deck_"):]
-        return f"营Bn {name}"
+        return tr("营Bn {name}", name=name)
 
     def _co_label(self, b, ci, c) -> str:
-        return f"连Co {ci} {self._name_or_content(b, ci, None, c)}"
+        return tr("连Co {ci} {v1}", ci=ci, v1=self._name_or_content(b, ci, None, c))
 
     def _pl_label(self, b, ci, si, p) -> str:
-        return f"排Pl {si} {self._name_or_content(b, ci, si, p)}"
+        return tr("排Pl {si} {v1}", si=si, v1=self._name_or_content(b, ci, si, p))
 
     def _name_or_content(self, b, ci, si, node) -> str:
         """Dictionary name when there is one, equipment composition otherwise."""
         name = self.session.platoon_name(node.name_hash)
-        if not name.startswith("⟨未知"):
+        if not name.startswith(tr("⟨未知")):
             return name
         return self.session.composition(b, ci, si) or name
 
@@ -900,7 +992,7 @@ class MainWindow(QMainWindow):
         deck = self._deck_of(role)
         if deck is None:
             self.table.setRowCount(0)
-            self.info.setText("选一个营查看槽位")
+            self.info.setText(tr("选一个营查看槽位"))
             return
         self.table.fill(s, deck)
         if role.kind == "co":
@@ -908,9 +1000,11 @@ class MainWindow(QMainWindow):
             # belong to it tells the user how far their edit would reach.
             self.table.highlight(role.ci, None)
             self.info.setText(
-                f"连Co {role.ci}：{len(deck.companies[role.ci].platoons)} 个排，"
-                f"{sum(len(p.windows) for p in deck.companies[role.ci].platoons)}"
-                f" 条  —— 要改装备请在右侧表里选一行")
+                tr("连Co {ci}：{v1} 个排，{v2} 条  —— 要改装备请在右侧表里选一行",
+                    ci=role.ci,
+                    v1=len(deck.companies[role.ci].platoons),
+                    v2=sum(len(p.windows) for p in deck.companies[role.ci].platoons),
+                ))
         elif role.kind in ("pl", "entry"):
             self.table.highlight(role.ci, role.si)
             # The table row is the only thing an action acts on, so aiming at
@@ -920,15 +1014,20 @@ class MainWindow(QMainWindow):
             platoon = deck.companies[role.ci].platoons[role.si]
             slots = [x for w in platoon.windows for x in w.slots()]
             self.info.setText(
-                f"连Co {role.ci} 排Pl {role.si}：{len(platoon.windows)} 条，"
-                f"占槽位 {sorted(slots)}  ——  "
-                f"改件数会重排该营全部下游窗口")
+                tr("连Co {ci} 排Pl {si}：{v2} 条，占槽位 {v3}  ——  改件数会重排该营全部下游窗口",
+                    ci=role.ci,
+                    si=role.si,
+                    v2=len(platoon.windows),
+                    v3=sorted(slots),
+                ))
         else:
             self.table.highlight(None, None)
             self.info.setText(
-                f"{deck.export_name}  槽位 "
-                f"{len(s.retiler.pool(deck.deck_object_id))} 个，"
-                f"Σ件数 {deck.window_sum}")
+                tr("{export_name}  槽位 {v1} 个，Σ件数 {window_sum}",
+                    export_name=deck.export_name,
+                    v1=len(s.retiler.pool(deck.deck_object_id)),
+                    window_sum=deck.window_sum,
+                ))
 
     def _need(self, *kinds: str) -> NodeRole | None:
         """The selected node, if its kind is acceptable.
@@ -938,22 +1037,24 @@ class MainWindow(QMainWindow):
         hit the leaf.
         """
         if self.session is None:
-            QMessageBox.information(self, "先打开一个 mod", "")
+            QMessageBox.information(self, tr("先打开一个 mod"), "")
             return None
         role = self._current()
         if role is None:
-            QMessageBox.information(self, "选择不对", "请先在左侧选中一个节点")
+            QMessageBox.information(self, tr("选择不对"), tr("请先在左侧选中一个节点"))
             return None
         if role.kind in kinds:
             return role
         if "entry" in kinds and role.kind == "pl":
             return NodeRole("entry", role.division, role.deck_id,
                             role.ci, role.si, 0)
-        names = {"div": "师", "bn": "营", "co": "连", "pl": "排",
-                 "entry": "条目"}
+        names = {"div": tr("师"), "bn": tr("营"), "co": tr("连"), "pl": tr("排"),
+                 "entry": tr("条目")}
         QMessageBox.information(
-            self, "选择不对",
-            f"请先选中一个排或装备条目（当前选中的是{names.get(role.kind, '节点')}）")
+            self, tr("选择不对"),
+            tr("请先选中一个排或装备条目（当前选中的是{v0}）",
+                v0=names.get(role.kind, '节点'),
+            ))
         return None
 
     # -- actions ----------------------------------------------------------
@@ -966,19 +1067,23 @@ class MainWindow(QMainWindow):
         deck = self._deck_of(role)
         platoon = deck.companies[role.ci].platoons[role.si]
         if not platoon.windows:
-            QMessageBox.information(self, "空排", "这个排没有装备条目")
+            QMessageBox.information(self, tr("空排"), tr("这个排没有装备条目"))
             return
         ei = min(role.ei, len(platoon.windows) - 1)
         window = platoon.windows[ei]
         text, ok = QInputDialog.getInt(
-            self, "改成几队",
-            f"排Pl {role.si} 第 {ei + 1} 条\n"
-            f"当前 {window.count} 队，占槽位 {list(window.slots())}\n\n改成：",
+            self, tr("改成几队"),
+            tr("排Pl {si} 第 {v1} 条\n当前 {count} 队，占槽位 {v3}\n\n改成：",
+                si=role.si,
+                v1=ei + 1,
+                count=window.count,
+                v3=list(window.slots()),
+            ),
             window.count, 1, 99)
         if not ok:
             return
         res = s.set_count(role.deck_id, role.ci, role.si, ei, text)
-        self._report(res, f"排Pl {role.si} 第 {ei + 1} 条")
+        self._report(res, tr("排Pl {si} 第 {v1} 条", si=role.si, v1=ei + 1))
         self._reload()
 
     def on_swap(self) -> None:
@@ -992,7 +1097,7 @@ class MainWindow(QMainWindow):
         s = self.session
         role = self._current()
         if role is None:
-            QMessageBox.information(self, "先选一个营", "")
+            QMessageBox.information(self, tr("先选一个营"), "")
             return
         # One selection source: the table row.  Falling back to the tree node
         # made the button act on an entry the user never picked, and opened a
@@ -1000,8 +1105,8 @@ class MainWindow(QMainWindow):
         addr = self.table.selected_entry()
         if addr is None:
             QMessageBox.information(
-                self, "先选一条装备",
-                "在右侧条目表里选一行（一行 = 一个装备条目，整行一起换）")
+                self, tr("先选一条装备"),
+                tr("在右侧条目表里选一行（一行 = 一个装备条目，整行一起换）"))
             return
         ci, si, ei = addr
         deck = self._deck_of(role)
@@ -1010,7 +1115,7 @@ class MainWindow(QMainWindow):
         try:
             window = deck.companies[ci].platoons[si].windows[ei]
         except (IndexError, AttributeError):
-            QMessageBox.information(self, "找不到这条", "该条目已不存在")
+            QMessageBox.information(self, tr("找不到这条"), tr("该条目已不存在"))
             return
         pool = s.retiler.pool(role.deck_id)
         pid = pool[window.pack_index] if 0 <= window.pack_index < len(pool) \
@@ -1018,15 +1123,20 @@ class MainWindow(QMainWindow):
         cur = s.packs.pack_key(pid) if pid is not None else None
         dlg = SwapDialog(s, cur, self)
         dlg.setWindowTitle(
-            f"换装备 —— 连Co {ci} 排Pl {si} 第 {ei + 1} 条"
-            f"（{window.count} 件，占槽位 {list(window.slots())}）")
+            tr("换装备 —— 连Co {ci} 排Pl {si} 第 {v2} 条（{count} 件，占槽位 {v4}）",
+                ci=ci,
+                si=si,
+                v2=ei + 1,
+                count=window.count,
+                v4=list(window.slots()),
+            ))
         if dlg.exec() != QDialog.Accepted:
             return
         want = dlg.chosen()
         if want is None:
             return
         res = s.swap_entry(role.deck_id, ci, si, ei, want)
-        self._report(res, f"换装备 cg{ci}/sg{si}/e{ei}")
+        self._report(res, tr("换装备 cg{ci}/sg{si}/e{ei}", ci=ci, si=si, ei=ei))
         self._reload()
 
     def on_insert(self) -> None:
@@ -1040,20 +1150,20 @@ class MainWindow(QMainWindow):
         cur = s.packs.pack_key(sample) if sample is not None else None
 
         dlg = SwapDialog(s, cur, self)
-        dlg.setWindowTitle("插入装备条目")
+        dlg.setWindowTitle(tr("插入装备条目"))
         if dlg.exec() != QDialog.Accepted:
             return
         want = dlg.chosen()
         if want is None:
             return
         count, ok = QInputDialog.getInt(
-            self, "插入装备条目",
-            f"在排Pl {role.si} 里新增一条装备。\n\n件数：", 1, 1, 99)
+            self, tr("插入装备条目"),
+            tr("在排Pl {si} 里新增一条装备。\n\n件数：", si=role.si), 1, 1, 99)
         if not ok:
             return
         res = s.insert_window(role.deck_id, role.ci, role.si,
                               count=count, key=want)
-        s.note_change(res, f"插入条目 co{role.ci}/pl{role.si}")
+        s.note_change(res, tr("插入条目 co{ci}/pl{si}", ci=role.ci, si=role.si))
         self._report(res)
         self._reload()
 
@@ -1066,8 +1176,8 @@ class MainWindow(QMainWindow):
         platoon = deck.companies[role.ci].platoons[role.si]
         if len(platoon.windows) <= 1:
             QMessageBox.information(
-                self, "不能删",
-                "这个排只剩一条装备，删掉就成了空排（官方数据没有这种形态）")
+                self, tr("不能删"),
+                tr("这个排只剩一条装备，删掉就成了空排（官方数据没有这种形态）"))
             return
         res = s.remove_window(role.deck_id, role.ci, role.si,
                               min(role.ei, len(platoon.windows) - 1))
@@ -1077,12 +1187,12 @@ class MainWindow(QMainWindow):
     def on_replace(self) -> None:
         """Batch replace over 师 / 营 / 连 / 排, starting from what is selected."""
         if self.session is None:
-            QMessageBox.information(self, "先打开一个 mod", "")
+            QMessageBox.information(self, tr("先打开一个 mod"), "")
             return
         role = self._current()
         if role is None or role.deck_id is None:
-            QMessageBox.information(self, "先选一个营",
-                                    "批量替换需要一个起始营来定位范围")
+            QMessageBox.information(self, tr("先选一个营"),
+                                    tr("批量替换需要一个起始营来定位范围"))
             return
         from ..edit.bulk import Scope
         # Open on the narrowest level the selection supports, so the common
@@ -1101,10 +1211,10 @@ class MainWindow(QMainWindow):
         picked = dlg.result()
         if picked is None:
             return
-        scope, from_pack, to_key = picked
-        res = self.session.scoped_replace(scope, from_pack).apply(to_key)
-        self.session.note_change(res, "批量替换")
-        self._report(res, f"批量替换（{scope.label()}）")
+        scope, from_packs, to_key = picked
+        res = self.session.scoped_replace(scope, from_packs).apply(to_key)
+        self.session.note_change(res, tr("批量替换"))
+        self._report(res, tr("批量替换（{v0}）", v0=scope.label()))
         self._reload()
 
     def on_save(self) -> None:
@@ -1114,11 +1224,11 @@ class MainWindow(QMainWindow):
         v = s.validate()
         if v.errors:
             QMessageBox.critical(
-                self, "有硬错误，不能保存",
+                self, tr("有硬错误，不能保存"),
                 "\n".join(i.message for i in v.errors[:5]))
             return
         target, _ = QFileDialog.getSaveFileName(
-            self, "保存到", str(s.path), "Deck.ndfbin (*.ndfbin)")
+            self, tr("保存到"), str(s.path), "Deck.ndfbin (*.ndfbin)")
         if not target:
             return
         target = Path(target)
@@ -1128,10 +1238,10 @@ class MainWindow(QMainWindow):
         try:
             data = s.save(target)
         except Exception as exc:                       # noqa: BLE001
-            QMessageBox.critical(self, "保存失败", str(exc))
+            QMessageBox.critical(self, tr("保存失败"), str(exc))
             traceback.print_exc()
             return
-        QMessageBox.information(self, "已保存", f"{target}\n{len(data):,} 字节")
+        QMessageBox.information(self, tr("已保存"), tr("{target}\n{v1:,} 字节", target=target, v1=len(data)))
 
     # -- helpers ----------------------------------------------------------
 
@@ -1190,7 +1300,7 @@ class MainWindow(QMainWindow):
         if s is None:
             return
         tail = s.log[-4:]
-        mark = "● 已修改，未保存" if s.dirty else "○ 未修改"
+        mark = tr("● 已修改，未保存") if s.dirty else tr("○ 未修改")
         self.log.setText(mark + ("\n" + "\n".join(tail) if tail else ""))
 
     def _report(self, res, what: str = "") -> None:
@@ -1199,10 +1309,10 @@ class MainWindow(QMainWindow):
             warns = getattr(res, "warnings", []) or []
             msg = head + res.summary()
             if warns:
-                msg += "\n\n提示：\n" + "\n".join(f"· {w}" for w in warns[:3])
-            QMessageBox.information(self, "完成", msg)
+                msg += tr("\n\n提示：\n") + "\n".join(f"· {w}" for w in warns[:3])
+            QMessageBox.information(self, tr("完成"), msg)
         else:
-            QMessageBox.warning(self, "被拒绝", head + (res.note or "未知原因"))
+            QMessageBox.warning(self, tr("被拒绝"), head + (res.note or tr("未知原因")))
         self._refresh_log()
 
 
@@ -1217,6 +1327,12 @@ def main() -> int:
     icon = paths.icon_path()
     if icon.is_file():
         app.setWindowIcon(QIcon(str(icon)))
+    # Before any window exists, so every label built afterwards — including the
+    # module-level ones, which see the language at import time — comes out right
+    # without a second pass.
+    code = settings.saved_language()
+    i18n.set_language(code)
+    qt_builtin.install(app, code)
     win = MainWindow()
     win.show()
     return app.exec()

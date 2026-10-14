@@ -32,6 +32,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+#: Line-buffer stdout.  These tests print a hundred lines of progress and then
+#: raise; when stdout is a pipe (``python -m tests.test_gui | tail``) Python
+#: block-buffers it while stderr stays unbuffered, so the traceback arrives
+#: *before* the lines it belongs to and ``tail`` shows a section header as the
+#: last thing on screen.  That is exactly how a variable shadowing bug got read
+#: as "the test binary crashes silently" for twenty minutes.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except (AttributeError, ValueError):        # stdout replaced or closed
+    pass
+
 #: Repository root — and therefore the directory ``ndfbin_decks`` lives in.
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:

@@ -22,3 +22,10 @@ venv/
 .workbuddy/
 .vscode/
 .idea/
+
+# --- internal recon -------------------------------------------------------
+# Reconnaissance reports quote one specific mod's organisation, unit counts
+# and naming quirks.  They are development notes for this editor, not
+# documentation for whoever installs it, so they stay local.  `doc/使用教程.md`
+# is the manual and *is* shipped -- the pattern stays deliberately narrow.
+doc/*勘查报告.md

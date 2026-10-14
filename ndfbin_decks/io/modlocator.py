@@ -21,6 +21,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from ..i18n import live, tr
 
 # ``[Properties]`` -> ``Name`` value.  Kept deliberately tolerant: the deployed
 # copies carry ``Name = AG Framework - Berlin 1989: The Encirclement`` and the
@@ -53,11 +54,11 @@ SOURCE_WORKSHOP = "workshop"  # ``<steamapps>/workshop/content/1611600/<id>/``
 SOURCE_MANUAL = "manual"      # a folder the user opened by hand
 
 #: Human labels for the picker.
-SOURCE_LABELS = {
-    SOURCE_DEPLOY: "本机",
-    SOURCE_WORKSHOP: "创意工坊",
-    SOURCE_MANUAL: "手动",
-}
+SOURCE_LABELS = live(globals(), "SOURCE_LABELS", lambda: {
+    SOURCE_DEPLOY: tr("本机"),
+    SOURCE_WORKSHOP: tr("创意工坊"),
+    SOURCE_MANUAL: tr("手动"),
+})
 
 
 class ModNotFound(FileNotFoundError):

@@ -25,6 +25,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import _env                                              # noqa: E402
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMessageBox, QInputDialog
 from PySide6.QtTest import QTest
 
@@ -785,6 +786,218 @@ def main() -> int:
           and not sov.contains(
               "$/GFX/Division/Descriptor_Deck_Division_RFA_TK_Nord_solo",
               1, 0, 0))
+
+    print()
+    print("=== 10b. many-to-one: several sources, one target ===")
+    # "Make every T-72M, T-72M1 and T-72B a T-72B" is one request.  It has to
+    # cost the same as a single replace — one relay per battalion, not one per
+    # source — and it must not touch a window that fields something else.
+    scope_div = scope_of("division")
+    usage = s.scoped_replace(scope_div, -1).usage()
+    check("the scope fields several kinds of equipment", len(usage) >= 3,
+          f"{len(usage)} kinds")
+    sources = [r[0] for r in usage[:3]]
+    src_keys = {s.packs.pack_key(p) for p in sources}
+    # By content, not by id: the file carries two pack objects with the same
+    # signature, so "not this id" is not the same as "not this equipment".
+    tgt = next(r[0] for r in usage if s.packs.pack_key(r[0]) not in src_keys)
+    tgt_key = s.packs.pack_key(tgt)
+
+    singles = [s.scoped_replace(scope_div, p).survey() for p in sources]
+    many = s.scoped_replace(scope_div, sources).survey()
+    union_decks = set().union(*[x.decks for x in singles])
+    check("a multi-source survey is the sum of the single-source ones",
+          many.entries == sum(x.entries for x in singles)
+          and many.units == sum(x.units for x in singles)
+          and many.decks == union_decks,
+          f"{many.entries} 条 / {many.units} 件 / {len(many.decks)} 营 vs "
+          f"{sum(x.entries for x in singles)} / "
+          f"{sum(x.units for x in singles)} / {len(union_decks)}")
+    check("and it reports how many sources it hit",
+          many.sources == len(sources), str(many.sources))
+
+    # The target among its own sources means "fold the others into it", not
+    # "do nothing"; and when the target is the *only* source there is genuinely
+    # nothing to do, which has to be said rather than passed off as a success.
+    #
+    # These run before the main replace because they write: the first one
+    # really does move a pack, and the main measurement below re-reads the
+    # usage list afterwards so it cannot be measured against a stale one.
+    res_ex = s.scoped_replace(scope_div, [tgt, sources[0]]).apply(tgt_key)
+    check("a target that is also a source is dropped, not refused",
+          res_ex.ok and res_ex.target_also_a_source and res_ex.sources == 1,
+          res_ex.note or res_ex.summary())
+    res_same = s.scoped_replace(scope_div, [tgt]).apply(tgt_key)
+    check("the target as the only source is refused with a reason",
+          not res_same.ok and "相同" in (res_same.note or ""),
+          res_same.note or "ok?")
+
+    def tally(scope):
+        """``pack_id -> entries`` for every window the scope covers."""
+        out: dict[int, int] = {}
+        for division, did2, ci2, si2, _ei, pid, _c in (
+                s.scoped_replace(scope, -1)._windows()):
+            if not scope.contains(division, did2, ci2, si2):
+                continue
+            out[pid] = out.get(pid, 0) + 1
+        return out
+
+    sources = [r[0] for r in s.scoped_replace(scope_div, -1).usage()
+               if s.packs.pack_key(r[0]) != tgt_key][:3]
+    before = tally(scope_div)
+    moved = sum(before.get(p, 0) for p in sources)
+    res = s.scoped_replace(scope_div, sources).apply(tgt_key)
+    check("many-to-one applied", res.ok, res.note or res.summary())
+    check("every source actually moved something", res.sources == len(sources),
+          str(res.sources))
+    s.note_change(res, "批量替换")
+    after = tally(scope_div)
+    check("no source survives in the scope",
+          all(after.get(p, 0) == 0 for p in sources),
+          str({p: after.get(p, 0) for p in sources}))
+    # Measured on the pack the target resolved to, not on the one the picker
+    # listed: a file can carry two pack objects with the same signature and
+    # ensure_pack is free to pick either, so "the target" is a content, not an
+    # id.  That is also why the exclusion above is compared by key.
+    check("the target resolved to a pack offering that key",
+          s.packs.pack_key(res.to_pack_id) == tgt_key, str(res.to_pack_id))
+    gained = after.get(res.to_pack_id, 0) - before.get(res.to_pack_id, 0)
+    check("the target absorbed exactly what the sources held",
+          gained == moved, f"+{gained} vs {moved}")
+    others = [p for p in before
+              if p not in set(sources) | {tgt, res.to_pack_id}]
+    check("every other pack is untouched",
+          all(before[p] == after.get(p, 0) for p in others),
+          str([p for p in others if before[p] != after.get(p, 0)][:5]))
+    check("the window count did not move either",
+          sum(before.values()) == sum(after.values()),
+          f"{sum(before.values())} -> {sum(after.values())}")
+    v = s.validate()
+    check("no hard errors after a many-to-one replace", not v.errors,
+          f"{len(v.errors)} errors")
+
+    print("=== 10c. the replace dialog takes several sources ===")
+    dlg_m = rmod.ReplaceDialog(s, scope_of("division"), s.display, win)
+    dlg_m.show()
+    app.processEvents()
+    take = min(3, dlg_m.from_list.count())
+    for r in range(take):
+        dlg_m.from_list.item(r).setCheckState(Qt.Checked)
+    app.processEvents()
+    check("ticking several rows selects several kinds",
+          dlg_m._ticked_rows() == take, str(dlg_m._ticked_rows()))
+    check("and every pack object those rows stand for",
+          len(dlg_m._selected()) >= take, str(dlg_m._selected()))
+    check("the counter says how many are ticked",
+          f"已勾选 {take}" in dlg_m.from_count.text(),
+          dlg_m.from_count.text())
+    check("two rows never name the same equipment",
+          len({r["key"] for r in dlg_m._rows}) == len(dlg_m._rows),
+          f"{len(dlg_m._rows)} rows")
+    dlg_m._to_key = tgt_key
+    dlg_m._refresh_summary()
+    check("with several sources the button is live",
+          dlg_m.ok_btn.isEnabled(), dlg_m.summary.text()[:60])
+    picked = dlg_m.result()
+    check("the result carries them all",
+          picked is not None and picked[1] == dlg_m._selected(),
+          str(picked[1] if picked else None))
+    dlg_m._set_all(False)
+    app.processEvents()
+    check("清空 unticks everything", dlg_m._selected() == [],
+          str(dlg_m._selected()))
+    # The buttons have to record the ticks themselves: the itemChanged signal
+    # is muted while they repaint, so a 全选 that only set the check state
+    # would leave a fully-ticked list reporting "已勾选 0 种".
+    dlg_m._set_all(True)
+    app.processEvents()
+    check("全选 ticks and records every row",
+          dlg_m._ticked_rows() == dlg_m.from_list.count(),
+          f"{dlg_m._ticked_rows()} of {dlg_m.from_list.count()}")
+    dlg_m._set_all(False)
+    app.processEvents()
+
+    # Target among the ticked sources: the dialog says so and waits, rather
+    # than offering to replace a pack with itself.
+    own = dlg_m._rows[0]["ids"][0]
+    dlg_m._checked = set(dlg_m._rows[0]["ids"])
+    dlg_m._to_key = s.packs.pack_key(own)
+    dlg_m._refresh_summary()
+    check("the target ticked alone disables the button",
+          not dlg_m.ok_btn.isEnabled(), dlg_m.summary.text()[:50])
+    dlg_m._checked = set(dlg_m._rows[0]["ids"]) | set(dlg_m._rows[1]["ids"])
+    dlg_m._refresh_summary()
+    check("with a second source it says the target was excluded",
+          dlg_m.ok_btn.isEnabled() and "剔除" in dlg_m.summary.text(),
+          dlg_m.summary.text()[:70])
+    dlg_m._checked = set()
+
+    print()
+    print("=== 10d. the search box narrows the list without touching the ticks ===")
+    dlg_s = rmod.ReplaceDialog(s, scope_of("division"), s.display, win)
+    dlg_s.show()
+    app.processEvents()
+    total_rows = dlg_s.from_list.count()
+    check("the search box starts empty and hides nothing",
+          dlg_s.from_search.text() == "" and dlg_s._visible_rows() == total_rows,
+          f"{dlg_s._visible_rows()}/{total_rows} visible")
+    needle = dlg_s.from_list.item(0).text()[:12]
+    dlg_s.from_search.setText(needle)
+    app.processEvents()
+    # Deliberately *not* named ``shown``: this function already has one of
+    # those — the list of dialogs the stubs recorded — and shadowing it here
+    # turned a passing section into an AttributeError three sections later.
+    matched = dlg_s._visible_rows()
+    check("typing hides the rows that do not match",
+          0 < matched < total_rows, f"{matched}/{total_rows} for {needle!r}")
+    check("and every row still visible really contains it",
+          all(needle.lower() in dlg_s.from_list.item(r).text().lower()
+              for r in range(total_rows)
+              if not dlg_s.from_list.item(r).isHidden()),
+          f"{matched} visible")
+    check("the counter owns up to the filter",
+          f"筛选出 {matched} / {total_rows}" in dlg_s.from_count.text(),
+          dlg_s.from_count.text())
+    # Tick a row, then filter it away.  The tick has to survive: if a filter
+    # dropped ticks, typing a letter would silently shrink a half-built
+    # request and the blast-radius figure would follow it down.  The *last*
+    # row is used on purpose — it is the one the needle does not match, so the
+    # tick genuinely ends up on a hidden row.
+    dlg_s.from_search.setText("")
+    app.processEvents()
+    last = total_rows - 1
+    dlg_s.from_list.item(last).setCheckState(Qt.Checked)
+    app.processEvents()
+    picked_before = list(dlg_s._selected())
+    dlg_s.from_search.setText(needle)
+    app.processEvents()
+    hidden_last = dlg_s.from_list.item(last).isHidden()
+    check("a tick on a filtered-away row survives, and is still counted",
+          hidden_last and dlg_s._selected() == picked_before
+          and dlg_s._ticked_rows() == 1,
+          f"{dlg_s._ticked_rows()} ticked, last hidden={hidden_last}")
+    check("the counter shows the hidden tick rather than dropping it",
+          "已勾选 1 种" in dlg_s.from_count.text(), dlg_s.from_count.text())
+    # 全选 follows the filter ...
+    dlg_s._set_all(True)
+    app.processEvents()
+    check("全选 takes every row the filter is showing",
+          all(dlg_s.from_list.item(r).checkState() == Qt.Checked
+              for r in range(total_rows)
+              if not dlg_s.from_list.item(r).isHidden()),
+          f"{dlg_s._visible_rows()} visible, all ticked")
+    check("and leaves the filtered-away tick alone",
+          dlg_s._ticked_rows() == dlg_s._visible_rows() + 1,
+          f"{dlg_s._ticked_rows()} ticked / {dlg_s._visible_rows()} visible")
+    # ... 清空 does not, so there is always one way back to a clean slate.
+    dlg_s._set_all(False)
+    app.processEvents()
+    check("清空 clears even the rows the search is hiding",
+          dlg_s._selected() == [], str(dlg_s._selected()))
+    dlg_s.from_search.setText("")
+    app.processEvents()
+    check("clearing the search brings every row back",
+          dlg_s._visible_rows() == total_rows, str(dlg_s._visible_rows()))
 
     print()
     print("=== 11. the picker only offers AG-usable packs of this file ===")

@@ -38,6 +38,7 @@ from pathlib import Path
 
 from ..core import cndf_codec
 from . import modlocator
+from ..i18n import tr
 
 #: ``export Descriptor_Unit_X is TEntityDescriptor`` — every unit descriptor in
 #: the game is one of these, in both the text and the compiled form.
@@ -206,23 +207,23 @@ class UnitUniverse:
         if not path:
             return ""
         if path in self.vanilla:
-            return "原版"
+            return tr("原版")
         if path in self.project or path in self.compiled:
-            return "本mod"
+            return tr("本mod")
         if path in self.referenced:
-            return "本文件"
+            return tr("本文件")
         return ""
 
     def summary(self) -> str:
         bits = []
         if self.vanilla:
-            bits.append(f"原版 {len(self.vanilla)}")
+            bits.append(tr("原版 {v0}", v0=len(self.vanilla)))
         if self.project or self.compiled:
             mine = self.own
-            bits.append(f"本 mod 自有 {len(mine)}")
+            bits.append(tr("本 mod 自有 {v0}", v0=len(mine)))
         if self.referenced:
-            bits.append(f"本文件已引用 {len(self.referenced)}")
-        bits.append(f"合计可选用 {len(self)}")
+            bits.append(tr("本文件已引用 {v0}", v0=len(self.referenced)))
+        bits.append(tr("合计可选用 {v0}", v0=len(self)))
         return " · ".join(bits)
 
     @property

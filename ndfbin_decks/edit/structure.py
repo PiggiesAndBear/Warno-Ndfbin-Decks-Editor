@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from ..core.deckmodel import DeckFile
 from .equip import DeckEditor, PackKey
 from .quantity import PENDING, Layout, Retiler, RetileResult
+from ..i18n import tr
 
 #: Advisory only — vanilla exceeds it (measured: 5 entries in one smart group).
 MAX_PACKS_PER_SMART_GROUP = 3
@@ -130,8 +131,12 @@ class StructureEditor:
             return res
         if len(pairs_list) >= MAX_PACKS_PER_SMART_GROUP:
             res.warnings.append(
-                f"战斗群 {ci}/连排 {si} 将有 {len(pairs_list) + 1} 条装备，"
-                f"超出官方建议值 {MAX_PACKS_PER_SMART_GROUP}")
+                tr("战斗群 {ci}/连排 {si} 将有 {v2} 条装备，超出官方建议值 {MAX_PACKS_PER_SMART_GROUP}",
+                    ci=ci,
+                    si=si,
+                    v2=len(pairs_list) + 1,
+                    MAX_PACKS_PER_SMART_GROUP=MAX_PACKS_PER_SMART_GROUP,
+                ))
 
         if reuse_pack is not None:
             if reuse_pack not in self.deck._packs:
@@ -169,8 +174,10 @@ class StructureEditor:
             res.note = f"no such window: cg{ci}/sg{si}/e{ei}"
             return res
         if len(pairs_list) == 1:
-            res.note = (f"战斗群 {ci}/连排 {si} 只剩这1 条装备，删掉就成了"
-                        f"空连排组（官方数据 0 例这种形态）。请先增加一条再删。")
+            res.note = (tr("战斗群 {ci}/连排 {si} 只剩这1 条装备，删掉就成了空连排组（官方数据 0 例这种形态）。请先增加一条再删。",
+                ci=ci,
+                si=si,
+            ))
             return res
 
         pool = self.retiler.pool(deck_object_id)

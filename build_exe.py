@@ -203,6 +203,15 @@ def main() -> int:
     ]
     for mod in TRIMMED_QT + TRIMMED_OTHER:
         args += ["--exclude-module", mod]
+    # The translation tables, one --add-data each.  JSON is data, not a module,
+    # so static analysis never finds it; and a directory source would copy the
+    # package's .py files along with it, which the module graph already carries.
+    tables = sorted((ROOT / "ndfbin_decks" / "i18n").glob("*.json"))
+    if not tables:
+        print("FAILED: no translation tables — run tools/i18n_sync.py --write")
+        return 1
+    for table in tables:
+        args += ["--add-data", f"{table}{os.pathsep}ndfbin_decks/i18n"]
     PyInstaller.__main__.run(args)
 
     exe = dist_dir / exe_name
@@ -220,6 +229,9 @@ def main() -> int:
         ("ndfbin_decks/app/swap_dialog", "the equipment picker"),
         ("ndfbin_decks/io/divisions", "the 师/国家 parser"),
         ("ndfbin_decks/io/unit_universe", "the unit universe"),
+        # Shipped as data, so the pattern has to name the file — see the
+        # ``--add-data`` above.  Missing, the app still runs, in Chinese.
+        ("ndfbin_decks/i18n/en.json", "the English interface table"),
         ("ndfbin_decks/core/cndf_codec", "the binary codec"),
         # Binary extensions: not readable as source, so PyInstaller's import
         # analysis is the only thing that can pull them in, and a codec that

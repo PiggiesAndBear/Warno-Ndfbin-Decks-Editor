@@ -30,14 +30,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import tradic
+from ..i18n import live, tr
 
 #: Dictionary families the deck editor actually needs.
 FAMILIES = ("PLATOONS", "COMPANIES", "UNITS")
 
 #: Shown when a hash resolves in no dictionary.
-UNKNOWN_TEMPLATE = "⟨未知 {key}⟩"
+UNKNOWN_TEMPLATE = live(globals(), "UNKNOWN_TEMPLATE", lambda: tr("⟨未知 {key}⟩"))
 #: Shown when the object carries no ``Name`` at all (16 vanilla smart groups do).
-ANONYMOUS = "⟨无名⟩"
+ANONYMOUS = live(globals(), "ANONYMOUS", lambda: tr("⟨无名⟩"))
 
 
 @dataclass(frozen=True)

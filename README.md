@@ -29,9 +29,10 @@ This tool reads and writes that binary directly.
 | **Change quantities** | 4 tanks → 6 tanks, and the rest of the battalion's slot layout is re-laid automatically |
 | **Swap equipment** | Pick from what the mod already has, or build a combination it does not |
 | **Insert / remove entries** | Add another equipment line to a platoon, or drop one |
-| **Batch replace** | Swap one piece of equipment across a 排 / 连 / 营 / 师 / whole **country** — with the blast radius shown before anything is written |
+| **Batch replace** | Swap one piece of equipment — or **merge several kinds into one** — across a 排 / 连 / 营 / 师 / whole **country**, with the blast radius shown before anything is written |
 | **Variants** | Give an entry a different transport, or pin its experience level |
 | **Filters** | Country → division → battalion, all type-to-search |
+| **Interface language** | 简体中文 / English, switched live — no restart, and unsaved edits survive |
 
 Safety is not bolted on:
 
@@ -254,8 +255,8 @@ published binary.
 ```bat
 py -3 -m venv .venv-build
 .venv-build\Scripts\pip install -r requirements.txt -r requirements-build.txt
-.venv-build\Scripts\python build_exe.py        # -> dist_0.1/Warno Ndfbin Decks Editor v0.1.exe
-.venv-build\Scripts\python verify_exe.py 0.1   # launches it headless, asserts, kills it
+.venv-build\Scripts\python build_exe.py        # -> dist_<ver>/Warno Ndfbin Decks Editor v<ver>.exe
+.venv-build\Scripts\python verify_exe.py       # launches it headless, asserts, kills it
 ```
 
 Build, verify and publish are three separate steps on purpose. The build writes
@@ -266,9 +267,10 @@ module graph, reported the expected version and left no errors — then measures
 the native window title and reads the icon back out of the PE. Only then is
 promoting it to `dist/` a one-line copy.
 
-Measured on the v0.1 build: **1.3 s** warm start (1.3 s unpacking the one-file
-bundle, 0.3 s of imports); the first run after a copy is 5-7 s because Defender
-scans the new binary.
+Measured on the v0.3 build: **1.3 s** warm start (all of it unpacking the
+one-file bundle, imports registering as 0.3 s).  The first launch of a freshly
+copied binary is 4.0 s — Defender scanning a file it has not seen before, which
+is why the number is worth taking twice before believing it.
 
 ## Notes and limitations
 

@@ -53,6 +53,7 @@ from dataclasses import dataclass, field
 from ..core.deckmodel import unit_leaf
 from ..edit.equip import PackKey
 from ..io import agfilter
+from ..i18n import live, tr
 
 #: NATO-ish country suffixes that end most unit names.  Used only to group the
 #: list, never to filter — an unknown suffix just lands in "other".
@@ -68,34 +69,34 @@ COUNTRY_SUFFIXES = (
 )
 
 #: Rough role hints, inferred from the name.  Purely cosmetic grouping.
-TYPE_HINTS = (
-    ("Trans", "运输"),
-    ("_trans_", "运输"),
-    ("truck", "运输"),
-    ("APC", "装甲"),
-    ("IFV", "装甲"),
-    ("MBT", "坦克"),
-    ("Tank", "坦克"),
-    ("Art", "炮兵"),
-    ("arty", "炮兵"),
-    ("MLRS", "炮兵"),
-    ("AAA", "防空"),
-    ("SAM", "防空"),
-    ("Fighter", "空军"),
-    ("Jet", "空军"),
-    ("MiG", "空军"),
-    ("Su_", "空军"),
-    ("Inf", "步兵"),
-    ("Rifle", "步兵"),
-    ("Rifles", "步兵"),
-    ("MotRifles", "步兵"),
-    ("HMG", "步兵"),
-    ("MG_", "步兵"),
-    ("Engineer", "工兵"),
-    ("Sniper", "步兵"),
-    ("Rocket", "步兵"),
-    ("Recon", "侦察"),
-)
+TYPE_HINTS = live(globals(), "TYPE_HINTS", lambda: (
+    ("Trans", tr("运输")),
+    ("_trans_", tr("运输")),
+    ("truck", tr("运输")),
+    ("APC", tr("装甲")),
+    ("IFV", tr("装甲")),
+    ("MBT", tr("坦克")),
+    ("Tank", tr("坦克")),
+    ("Art", tr("炮兵")),
+    ("arty", tr("炮兵")),
+    ("MLRS", tr("炮兵")),
+    ("AAA", tr("防空")),
+    ("SAM", tr("防空")),
+    ("Fighter", tr("空军")),
+    ("Jet", tr("空军")),
+    ("MiG", tr("空军")),
+    ("Su_", tr("空军")),
+    ("Inf", tr("步兵")),
+    ("Rifle", tr("步兵")),
+    ("Rifles", tr("步兵")),
+    ("MotRifles", tr("步兵")),
+    ("HMG", tr("步兵")),
+    ("MG_", tr("步兵")),
+    ("Engineer", tr("工兵")),
+    ("Sniper", tr("步兵")),
+    ("Rocket", tr("步兵")),
+    ("Recon", tr("侦察")),
+))
 
 UNIT_RE = re.compile(r"$/GFX/Unit/Descriptor_Unit_(?P<leaf>.+)$")
 
@@ -182,9 +183,11 @@ class ScopeStats:
     ag_without_xp: int = 0
 
     def summary(self) -> str:
-        return (f"{self.ag} 个将军模式可用装备包"
-                f"（已排除 {self.skirmish_only} 个 PvP/行动模式专用、"
-                f"{self.unreferenced} 个无人引用）")
+        return (tr("{ag} 个将军模式可用装备包（已排除 {skirmish_only} 个 PvP/行动模式专用、{unreferenced} 个无人引用）",
+            ag=self.ag,
+            skirmish_only=self.skirmish_only,
+            unreferenced=self.unreferenced,
+        ))
 
 
 @dataclass(frozen=True)
@@ -229,16 +232,16 @@ class PackChoice:
         for token, label in TYPE_HINTS:
             if token.lower() in leaf.lower():
                 return f"{label} · {country}" if country else label
-        return country or "其他"
+        return country or tr("其他")
 
     def label(self) -> str:
         bits = [self.unit_name]
         if self.transporter:
             bits.append(f"[{unit_leaf(self.transporter)}]")
         if self.experience is not None:
-            bits.append(f"经验{self.experience}")
+            bits.append(tr("经验{experience}", experience=self.experience))
         else:
-            bits.append("继承经验")
+            bits.append(tr("继承经验"))
         bits.append(f"#{self.pack_object_id}")
         if self.uses:
             bits.append(f"×{self.uses}")
@@ -255,9 +258,9 @@ class PackChoice:
                 str(self.pack_object_id)]
         if self.experience is not None:
             bits += [str(self.experience), f"xp{self.experience}",
-                     f"经验{self.experience}"]
+                     tr("经验{experience}", experience=self.experience)]
         else:
-            bits += ["继承", "无xp", "noxp"]
+            bits += [tr("继承"), tr("无xp"), "noxp"]
         return " ".join(b for b in bits if b).lower()
 
 

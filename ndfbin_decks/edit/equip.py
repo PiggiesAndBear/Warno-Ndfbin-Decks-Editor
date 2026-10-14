@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from ..core import cndf_codec
 from ..core.deckmodel import DeckFile, unit_leaf
 from .quantity import Retiler
+from ..i18n import tr
 
 PACK = "TDeckPackDescriptor"
 
@@ -243,12 +244,14 @@ class DeckEditor:
         try:
             window = deck.companies[ci].platoons[si].windows[ei]
         except (IndexError, AttributeError):
-            res.note = f"条目 cg{ci}/sg{si}/e{ei} 不存在"
+            res.note = tr("条目 cg{ci}/sg{si}/e{ei} 不存在", ci=ci, si=si, ei=ei)
             return res
         res.slot = window.pack_index
         if not 0 <= window.pack_index < len(pool):
-            res.note = (f"条目指向槽位 {window.pack_index}，超出 "
-                        f"{len(pool)} 槽的池子")
+            res.note = (tr("条目指向槽位 {pack_index}，超出 {v1} 槽的池子",
+                pack_index=window.pack_index,
+                v1=len(pool),
+            ))
             return res
         old_pack = pool[window.pack_index]
         res.before = self.pack_key(old_pack)
@@ -313,14 +316,14 @@ class DeckEditor:
         try:
             window = deck.companies[ci].platoons[si].windows[ei]
         except (IndexError, AttributeError):
-            res.note = f"条目 cg{ci}/sg{si}/e{ei} 不存在"
+            res.note = tr("条目 cg{ci}/sg{si}/e{ei} 不存在", ci=ci, si=si, ei=ei)
             return res
         if not 0 <= window.pack_index < len(pool):
-            res.note = f"条目指向槽位 {window.pack_index}，越界"
+            res.note = tr("条目指向槽位 {pack_index}，越界", pack_index=window.pack_index)
             return res
         cur = self.pack_key(pool[window.pack_index])
         if cur is None:
-            res.note = "该条目没有可解析的 pack"
+            res.note = tr("该条目没有可解析的 pack")
             return res
         want = PackKey(
             unit=cur.unit,

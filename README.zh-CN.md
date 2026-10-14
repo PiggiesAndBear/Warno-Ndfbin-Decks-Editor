@@ -27,9 +27,10 @@
 | **改件数** | 4 辆改成 6 辆，该营后面的槽位排布自动重排 |
 | **换装备** | 从 mod 已有的装备里选，也可以造一个它还没有的组合 |
 | **插入 / 删除条目** | 往一个排里加一条装备，或者删掉一条 |
-| **批量替换** | 把某件装备在 排 / 连 / 营 / 师 / **整个国家** 范围内批量换掉 —— 动手前先显示会影响多少 |
+| **批量替换** | 把某件装备 —— 或**把好几种一起并成一种** —— 在 排 / 连 / 营 / 师 / **整个国家** 范围内换掉，动手前先显示会影响多少 |
 | **变体** | 给一条装备换运输载具，或指定它的经验等级 |
 | **筛选** | 国家 → 师 → 营，三级都可直接打字搜索 |
+| **界面语言** | 简体中文 / English，即时切换 —— 不重启，也不会丢未保存的改动 |
 
 安全性不是事后补的：
 
@@ -229,8 +230,8 @@ doc/使用教程.md              面向无编程基础用户的使用教程
 ```bat
 py -3 -m venv .venv-build
 .venv-build\Scripts\pip install -r requirements.txt -r requirements-build.txt
-.venv-build\Scripts\python build_exe.py        # -> dist_0.1/Warno Ndfbin Decks Editor v0.1.exe
-.venv-build\Scripts\python verify_exe.py 0.1   # 无头启动、断言、杀进程
+.venv-build\Scripts\python build_exe.py        # -> dist_<版本>/Warno Ndfbin Decks Editor v<版本>.exe
+.venv-build\Scripts\python verify_exe.py       # 无头启动、断言、杀进程
 ```
 
 构建、验证、发布刻意分成三步。构建只写 `build_<ver>/` 和 `dist_<ver>/`，
@@ -239,8 +240,9 @@ py -3 -m venv .venv-build
 版本号符合预期、日志无错误；然后**实测原生窗口标题**、并从 PE 里把图标读回来。
 只有这些都过了，提升到 `dist/` 才是一条 `cp`。
 
-v0.1 实测：**热启动 1.3 秒**（其中 1.3 秒是解压单文件包，0.3 秒是导入）；
-刚拷贝过来第一次运行是 5–7 秒，因为 Defender 要扫描这个新文件。
+v0.3 实测：**热启动 1.3 秒**（几乎全是解压单文件包的时间，导入那一段约 0.3 秒）；
+刚拷贝过来的第一次运行是 4.0 秒 —— Defender 要扫一个没见过的文件。
+所以这个数字值得跑两遍再信。
 
 ## 说明与限制
 

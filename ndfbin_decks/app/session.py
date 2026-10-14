@@ -10,6 +10,7 @@ let a later save silently overwrite an earlier one.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from ..edit.quantity import RetileResult, Retiler
 from ..edit.structure import StructureEditor
 from ..io import agfilter, divisions, localisation, modlocator, unit_universe
 from .catalog import PackCatalogue, ag_pack_ids
+from ..i18n import tr
 
 
 @dataclass
@@ -255,10 +257,10 @@ class Session:
     def platoon_name(self, name_hash: bytes | None) -> str:
         """Platoon display name, falling back to ``⟨未知 hash⟩``."""
         if name_hash is None:
-            return "⟨无名⟩"
+            return tr("⟨无名⟩")
         if self.resolver is not None:
             return self.resolver.display(name_hash)
-        return f"⟨未知 {name_hash.hex()[:8]}⟩"
+        return tr("⟨未知 {v0}⟩", v0=name_hash.hex()[:8])
 
     def validate(self) -> validator.ValidationResult:
         return validator.validate_file(self.deck)
@@ -287,7 +289,7 @@ class Session:
         construction and ``Σ(Number) == len(DeckPackList)`` still holds.
         """
         res = self.packs.swap_entry(deck_object_id, ci, si, ei, want)
-        self.note_change(res, f"换装备 cg{ci}/sg{si}/e{ei}")
+        self.note_change(res, tr("换装备 cg{ci}/sg{si}/e{ei}", ci=ci, si=si, ei=ei))
         return res
 
     def heal_window(self, deck_object_id: int, ci: int, si: int, ei: int,
@@ -299,7 +301,7 @@ class Session:
         cannot create one.
         """
         res = self.retiler.heal_window(deck_object_id, ci, si, ei, keep_pack)
-        self.note_change(res, f"修复混合窗口 cg{ci}/sg{si}/e{ei}")
+        self.note_change(res, tr("修复混合窗口 cg{ci}/sg{si}/e{ei}", ci=ci, si=si, ei=ei))
         return res
 
     def set_entry_experience(self, deck_object_id: int, ci: int, si: int,
@@ -307,7 +309,7 @@ class Session:
         """Repoint one entry at the same unit carrying ``level``."""
         res = self.packs.set_entry_experience(deck_object_id, ci, si, ei,
                                               level)
-        self.note_change(res, f"改经验 cg{ci}/sg{si}/e{ei} -> {level}")
+        self.note_change(res, tr("改经验 cg{ci}/sg{si}/e{ei} -> {level}", ci=ci, si=si, ei=ei, level=level))
         return res
 
     def set_entry_transporter(self, deck_object_id: int, ci: int, si: int,
@@ -315,7 +317,7 @@ class Session:
         """Repoint one entry at the same unit riding ``unit``."""
         res = self.packs.set_entry_transporter(deck_object_id, ci, si, ei,
                                                unit)
-        self.note_change(res, f"改运输 cg{ci}/sg{si}/e{ei}")
+        self.note_change(res, tr("改运输 cg{ci}/sg{si}/e{ei}", ci=ci, si=si, ei=ei))
         return res
 
     def _deck_name(self, deck_object_id: int) -> str:
@@ -325,30 +327,34 @@ class Session:
     def set_count(self, deck_object_id: int, ci: int, si: int, ei: int,
                   count: int):
         res = self.retiler.set_count(deck_object_id, ci, si, ei, count)
-        self.note_change(res, f"改数量 cg{ci}/sg{si}/e{ei} -> {count}")
+        self.note_change(res, tr("改数量 cg{ci}/sg{si}/e{ei} -> {count}", ci=ci, si=si, ei=ei, count=count))
         return res
 
     def insert_window(self, deck_object_id: int, ci: int, si: int,
                       **kwargs):
         res = self.structure.insert_window(deck_object_id, ci, si, **kwargs)
-        self.note_change(res, f"插入条目 cg{ci}/sg{si}")
+        self.note_change(res, tr("插入条目 cg{ci}/sg{si}", ci=ci, si=si))
         return res
 
     def remove_window(self, deck_object_id: int, ci: int, si: int, ei: int):
         res = self.structure.remove_window(deck_object_id, ci, si, ei)
-        self.note_change(res, f"删除条目 cg{ci}/sg{si}/e{ei}")
+        self.note_change(res, tr("删除条目 cg{ci}/sg{si}/e{ei}", ci=ci, si=si, ei=ei))
         return res
 
     # -- batch (see edit.bulk) -------------------------------------------
 
-    def scoped_replace(self, scope, from_pack_id: int):
+    def scoped_replace(self, scope, from_packs: int | Iterable[int] = -1):
         """A :class:`~ndfbin_decks.edit.bulk.ScopedReplace` bound to this file.
+
+        ``from_packs`` is one pack object id, or several — a many-to-one
+        replace is the same executor with a wider set.  ``-1`` means "no
+        filter", which is how the picker lists everything the scope fields.
 
         Returned un-executed: the caller surveys the blast radius, shows it,
         and only then applies.
         """
         return ScopedReplace(self.deck, self.packs, self.retiler, scope,
-                             from_pack_id)
+                             from_packs)
 
     def note_change(self, res, what: str) -> None:
         """Record a successful edit and refresh every derived view."""
@@ -367,7 +373,7 @@ class Session:
         target = Path(path) if path else self.path
         data = self.packs.save(target)
         self.dirty = False
-        self.note(f"已保存 -> {target}（{len(data):,} 字节）")
+        self.note(tr("已保存 -> {target}（{v1:,} 字节）", target=target, v1=len(data)))
         return data
 
 
@@ -452,7 +458,10 @@ def open_mod(mod, lang: str = "SC") -> Session:
         raise FileNotFoundError(str(exc)) from exc
     if not Path(deck_bin).is_file():
         raise FileNotFoundError(
-            f"{paths.label} 没有 Gen/NDF/GFX/Deck.ndfbin（{paths.deploy}）")
+            tr("{label} 没有 Gen/NDF/GFX/Deck.ndfbin（{deploy}）",
+                label=paths.label,
+                deploy=paths.deploy,
+            ))
     # Hand the resolved ModPaths down: it is what tells the session which
     # ``base.zip`` / ``Unit.ndfbin`` belong to this mod's load order.
     return Session.load(Path(deck_bin), lang=lang, mod=paths)

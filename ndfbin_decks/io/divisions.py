@@ -26,6 +26,7 @@ the picker matches either.
 from __future__ import annotations
 
 import re
+from ..i18n import live, tr
 
 #: Prefix the game stamps on every division export name.
 DIVISION_PREFIX = "Descriptor_Deck_Division_"
@@ -36,26 +37,26 @@ DIVISION_SUFFIXES = ("_solo", "_coop", "_multi")
 
 #: Display names for the codes the shipped campaigns use.  Anything missing
 #: falls back to the bare code, so a mod that invents ``XYZ`` still shows up.
-COUNTRY_NAMES: dict[str, str] = {
-    "SOV": "苏联",
-    "US": "美国",
-    "RFA": "西德",
-    "RDA": "东德",
-    "POL": "波兰",
-    "TCH": "捷克斯洛伐克",
-    "FR": "法国",
-    "UK": "英国",
-    "NL": "荷兰",
-    "BEL": "比利时",
-    "CAN": "加拿大",
-    "ESP": "西班牙",
-    "NATO": "北约",
-    "AGF": "AGF 自动生成",
-    "YUG": "南斯拉夫",
-    "JPN": "日本",
-    "ROK": "韩国",
-    "PRC": "中国",
-}
+COUNTRY_NAMES: dict[str, str] = live(globals(), "COUNTRY_NAMES", lambda: {
+    "SOV": tr("苏联"),
+    "US": tr("美国"),
+    "RFA": tr("西德"),
+    "RDA": tr("东德"),
+    "POL": tr("波兰"),
+    "TCH": tr("捷克斯洛伐克"),
+    "FR": tr("法国"),
+    "UK": tr("英国"),
+    "NL": tr("荷兰"),
+    "BEL": tr("比利时"),
+    "CAN": tr("加拿大"),
+    "ESP": tr("西班牙"),
+    "NATO": tr("北约"),
+    "AGF": tr("AGF 自动生成"),
+    "YUG": tr("南斯拉夫"),
+    "JPN": tr("日本"),
+    "ROK": tr("韩国"),
+    "PRC": tr("中国"),
+})
 
 #: Extra ASCII spellings that should find a code, shown in the picker's label
 #: so its own type-to-filter reaches them.  ``RDA``/``DDR`` is the pair that
@@ -85,7 +86,7 @@ def division_label(path: str | None) -> str:
     rather than an empty string, so it stays visible in the picker.
     """
     if not path:
-        return "（未标师的营）"
+        return tr("（未标师的营）")
     leaf = path.rsplit("/", 1)[-1]
     m = _DIVISION_LEAF_RE.match(leaf)
     if m:
@@ -94,7 +95,7 @@ def division_label(path: str | None) -> str:
         if leaf.endswith(suffix):
             leaf = leaf[: -len(suffix)]
             break
-    return leaf or "（无名师）"
+    return leaf or tr("（无名师）")
 
 
 def country_code(path_or_label: str | None) -> str:
@@ -129,7 +130,7 @@ def country_label(code: str, divisions: int, battalions: int | None = None) -> s
     """
     c = (code or "").upper()
     head = " / ".join([c, *COUNTRY_ALIASES.get(c, ())])
-    tail = f"  ({divisions} 师"
-    tail += f" · {battalions} 营)" if battalions is not None else ")"
+    tail = tr("  ({divisions} 师", divisions=divisions)
+    tail += tr(" · {battalions} 营)", battalions=battalions) if battalions is not None else ")"
     return f"{head}  {country_name(c)}{tail}"
 

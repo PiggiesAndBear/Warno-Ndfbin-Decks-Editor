@@ -51,6 +51,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..core.deckmodel import DeckFile
+from ..i18n import tr
 
 #: Official ``GroupRules`` caps, used as **advisories only**.  Unmodified
 #: vanilla already exceeds them — measured: 7 smart groups in one company,
@@ -407,20 +408,28 @@ class Retiler:
         try:
             pair = groups[ci][si][ei]
         except (IndexError, TypeError, KeyError):
-            res.note = f"条目 cg{ci}/sg{si}/e{ei} 不存在"
+            res.note = tr("条目 cg{ci}/sg{si}/e{ei} 不存在", ci=ci, si=si, ei=ei)
             return res
         start, count = _read_pair(pair)
         if start < 0 or start + count > len(pool):
-            res.note = (f"条目 cg{ci}/sg{si}/e{ei} 指向槽位 {start}+{count}，"
-                        f"超出 {len(pool)} 槽的池子")
+            res.note = (tr("条目 cg{ci}/sg{si}/e{ei} 指向槽位 {start}+{count}，超出 {v5} 槽的池子",
+                ci=ci,
+                si=si,
+                ei=ei,
+                start=start,
+                count=count,
+                v5=len(pool),
+            ))
             return res
 
         covered = {pool[s] for s in range(start, start + count)}
         if len(covered) <= 1:
             return self.relay(deck_object_id)
         if keep_pack not in covered:
-            res.note = (f"pack#{keep_pack} 不在这个窗口里 "
-                        f"（窗口持有 {sorted(covered)}，必须从中挑一个）")
+            res.note = (tr("pack#{keep_pack} 不在这个窗口里 （窗口持有 {v1}，必须从中挑一个）",
+                keep_pack=keep_pack,
+                v1=sorted(covered),
+            ))
             return res
 
         for s in range(start, start + count):
@@ -429,8 +438,13 @@ class Retiler:
                        self._pool_template(deck_object_id))
         res = self.relay(deck_object_id)
         if res.ok:
-            res.note = (f"条目 cg{ci}/sg{si}/e{ei}（{count} 件）"
-                        f"已统一为 pack#{keep_pack}")
+            res.note = (tr("条目 cg{ci}/sg{si}/e{ei}（{count} 件）已统一为 pack#{keep_pack}",
+                ci=ci,
+                si=si,
+                ei=ei,
+                count=count,
+                keep_pack=keep_pack,
+            ))
         return res
 
     # -- helpers -----------------------------------------------------------
@@ -471,16 +485,25 @@ class Retiler:
         """
         notes: list[str] = []
         if len(groups) > MAX_COMBAT_GROUPS_PER_DECK:
-            notes.append(f"牌组有 {len(groups)} 个战斗群，"
-                         f"超出官方建议值 {MAX_COMBAT_GROUPS_PER_DECK}")
+            notes.append(tr("牌组有 {v0} 个战斗群，超出官方建议值 {MAX_COMBAT_GROUPS_PER_DECK}",
+                v0=len(groups),
+                MAX_COMBAT_GROUPS_PER_DECK=MAX_COMBAT_GROUPS_PER_DECK,
+            ))
         for ci, cgroup in enumerate(groups):
             if len(cgroup) > MAX_SMART_GROUPS_PER_COMBAT_GROUP:
-                notes.append(f"战斗群 {ci} 有 {len(cgroup)} 个连排，"
-                             f"超出官方建议值 {MAX_SMART_GROUPS_PER_COMBAT_GROUP}")
+                notes.append(tr("战斗群 {ci} 有 {v1} 个连排，超出官方建议值 {MAX_SMART_GROUPS_PER_COMBAT_GROUP}",
+                    ci=ci,
+                    v1=len(cgroup),
+                    MAX_SMART_GROUPS_PER_COMBAT_GROUP=MAX_SMART_GROUPS_PER_COMBAT_GROUP,
+                ))
             for si, pairs in enumerate(cgroup):
                 if len(pairs) > MAX_PACKS_PER_SMART_GROUP:
-                    notes.append(f"战斗群 {ci}/连排 {si} 有 {len(pairs)} 条装备，"
-                                 f"超出官方建议值 {MAX_PACKS_PER_SMART_GROUP}")
+                    notes.append(tr("战斗群 {ci}/连排 {si} 有 {v2} 条装备，超出官方建议值 {MAX_PACKS_PER_SMART_GROUP}",
+                        ci=ci,
+                        si=si,
+                        v2=len(pairs),
+                        MAX_PACKS_PER_SMART_GROUP=MAX_PACKS_PER_SMART_GROUP,
+                    ))
         return notes
 
 

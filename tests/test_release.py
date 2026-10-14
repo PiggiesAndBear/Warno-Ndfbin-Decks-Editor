@@ -57,8 +57,14 @@ def main() -> int:
           build_exe.read_version() == __version__,
           build_exe.read_version())
     exe_name = f"{APP_NAME} v{__version__}.exe"
-    check("the artefact name is what was asked for",
-          exe_name == "Warno Ndfbin Decks Editor v0.1.exe", exe_name)
+    # Not compared against a literal like "…v0.1.exe": that is a version bump
+    # waiting to be forgotten, and the line above already pins the artefact to
+    # the number in the code.  What is worth freezing is the *name*, which is
+    # the half that is not supposed to move.
+    check("the artefact is labelled with the product name",
+          APP_NAME == "Warno Ndfbin Decks Editor" and exe_name.startswith(
+              APP_NAME) and exe_name.endswith(f"v{__version__}.exe"),
+          exe_name)
 
     print()
     print("=== 2. the icon is one PyInstaller and the shell will both take ===")
@@ -233,6 +239,15 @@ def main() -> int:
           "open_embedded_archive" in source)
     check("paths passed to PyInstaller are absolute",
           "str(ROOT /" in tail and '--add-data", f"{icon}' in tail)
+    # The picker offers only languages that have a table, and the build ships
+    # one --add-data per i18n/*.json.  If those two ever disagree, the EXE
+    # either offers a language it cannot deliver — the user switches and gets
+    # Chinese back — or silently leaves a finished table out of the bundle.
+    from ndfbin_decks import i18n
+    tables = sorted(p.stem for p in (ROOT / "ndfbin_decks" / "i18n").glob("*.json"))
+    offered = sorted(c for c, _ in i18n.available() if c != i18n.SOURCE_LANG)
+    check("every language the picker offers ships a table, and vice versa",
+          offered == tables, f"offered={offered} tables={tables}")
 
     print()
     if FAILURES:

@@ -32,6 +32,7 @@ if str(ROOT) not in sys.path:
 
 from ndfbin_decks import APP_NAME, APP_TAGLINE, __version__      # noqa: E402
 from ndfbin_decks import paths                                   # noqa: E402
+from ndfbin_decks.i18n import tr
 
 #: Keep the log openable.  One line per launch is nothing; a warning that
 #: repeats on every start is not.
@@ -101,10 +102,10 @@ def install_excepthook(log: Path | None) -> None:
             from PySide6.QtWidgets import QApplication, QMessageBox
             QApplication.instance() or QApplication([])
             QMessageBox.critical(
-                None, "出错了",
+                None, tr("出错了"),
                 f"{exc_type.__name__}: {exc}\n\n"
-                + (f"完整信息已写入：\n{where}" if where else
-                   "完整信息已写入控制台"))
+                + (tr("完整信息已写入：\n{where}", where=where) if where else
+                   tr("完整信息已写入控制台")))
         except Exception:                          # noqa: BLE001
             pass
 

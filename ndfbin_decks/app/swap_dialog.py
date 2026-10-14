@@ -39,14 +39,15 @@ from PySide6.QtWidgets import (
 from ..core.deckmodel import unit_leaf
 from ..edit.equip import PackKey
 from .catalog import PackCatalogue, parse_unit_path
+from ..i18n import live, tr
 
 #: The 经验 selector.  ``None`` means "inherit the division's level", which is
 #: the default: 311 of Test's 2690 AG packs write no ``ExperienceLevel`` and are
 #: load-bearing, so an absent level is a legitimate choice rather than a gap.
-EXPERIENCE_CHOICES = (("继承（不写 Xp）", None), ("经验 1", 1),
-                      ("经验 2", 2), ("经验 3", 3))
+EXPERIENCE_CHOICES = live(globals(), "EXPERIENCE_CHOICES", lambda: ((tr("继承（不写 Xp）"), None), (tr("经验 1"), 1),
+                      (tr("经验 2"), 2), (tr("经验 3"), 3)))
 
-NO_TRANSPORT = "— 无 —"
+NO_TRANSPORT = live(globals(), "NO_TRANSPORT", lambda: tr("— 无 —"))
 
 #: Separator between a unit name and its provenance tag in the dropdowns
 #: (``FOB_BEL  · 本mod``).  Two spaces and a middle dot, which no unit leaf can
@@ -74,7 +75,7 @@ class SwapDialog(QDialog):
 
     def __init__(self, session, current: PackKey | None, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("换装备 · 新建装备组合")
+        self.setWindowTitle(tr("换装备 · 新建装备组合"))
         self.resize(760, 700)
         self._session = session
         self._catalogue: PackCatalogue = session.get_catalogue()
@@ -121,10 +122,12 @@ class SwapDialog(QDialog):
 
     def _build_intro(self) -> QWidget:
         label = QLabel(
-            f"已有装备包 {len(self._catalogue)} 个（下面第 1 区）"
-            f"｜可定义单位 {len(self._universe)} 个（下面第 2 区的下拉）\n"
-            f"{self._universe.summary()}\n"
-            f"牌组来源：{self._catalogue.source_path}")
+            tr("已有装备包 {v0} 个（下面第 1 区）｜可定义单位 {v1} 个（下面第 2 区的下拉）\n{v2}\n牌组来源：{source_path}",
+                v0=len(self._catalogue),
+                v1=len(self._universe),
+                v2=self._universe.summary(),
+                source_path=self._catalogue.source_path,
+            ))
         label.setWordWrap(True)
         return label
 
@@ -133,18 +136,18 @@ class SwapDialog(QDialog):
         col = QVBoxLayout(box)
         col.setContentsMargins(0, 0, 0, 0)
 
-        head = QLabel("1 &nbsp;从本 mod 已有的装备包里选")
+        head = QLabel(tr("1 &nbsp;从本 mod 已有的装备包里选"))
         head.setTextFormat(Qt.RichText)
         col.addWidget(head)
 
         row = QHBoxLayout()
-        row.addWidget(QLabel("搜索："))
+        row.addWidget(QLabel(tr("搜索：")))
         self.search = QLineEdit()
-        self.search.setPlaceholderText("装备名 / 运输机 / pack 编号 / 经验3")
+        self.search.setPlaceholderText(tr("装备名 / 运输机 / pack 编号 / 经验3"))
         self.search.textChanged.connect(self._refresh_list)
         row.addWidget(self.search, stretch=1)
         self.group_box = QComboBox()
-        self.group_box.addItem("全部分组")
+        self.group_box.addItem(tr("全部分组"))
         self.group_box.addItems(self._catalogue.groups())
         self.group_box.currentIndexChanged.connect(self._refresh_list)
         row.addWidget(self.group_box)
@@ -156,8 +159,8 @@ class SwapDialog(QDialog):
         return box
 
     def _build_separator(self) -> QWidget:
-        label = QLabel("或者 ↓ &nbsp;在下面造一个本 mod 还没有的组合"
-                       "（单位 + 载具 + 经验）")
+        label = QLabel(tr("或者 ↓ &nbsp;在下面造一个本 mod 还没有的组合"
+                       "（单位 + 载具 + 经验）"))
         label.setTextFormat(Qt.RichText)
         label.setStyleSheet("color: palette(mid); padding-top: 4px;")
         return label
@@ -168,24 +171,24 @@ class SwapDialog(QDialog):
         grid.setContentsMargins(0, 0, 0, 0)
 
         self.unit_box = self._nameable_combo()
-        grid.addWidget(QLabel("单位（可手输）"), 0, 0)
+        grid.addWidget(QLabel(tr("单位（可手输）")), 0, 0)
         grid.addWidget(self.unit_box, 1, 0)
 
         self.trans_box = self._nameable_combo(none_label=NO_TRANSPORT)
-        grid.addWidget(QLabel("载具（可留空）"), 0, 1)
+        grid.addWidget(QLabel(tr("载具（可留空）")), 0, 1)
         grid.addWidget(self.trans_box, 1, 1)
 
         self.xp_box = QComboBox()
         for text, value in EXPERIENCE_CHOICES:
             self.xp_box.addItem(text, value)
-        grid.addWidget(QLabel("经验"), 0, 2)
+        grid.addWidget(QLabel(tr("经验")), 0, 2)
         grid.addWidget(self.xp_box, 1, 2)
 
-        self.only_proven = QCheckBox("只列出将军模式已引用过的（默认列出全部可定义单位）")
+        self.only_proven = QCheckBox(tr("只列出将军模式已引用过的（默认列出全部可定义单位）"))
         self.only_proven.setToolTip(
-            "关（默认）：列出本 mod 能引用的全部单位 —— 原版数据 + 本 mod 的\n"
+            tr("关（默认）：列出本 mod 能引用的全部单位 —— 原版数据 + 本 mod 的\n"
             "Unit.ndfbin + 本文件已引用过的。开着：只列出本文件的将军模式牌组\n"
-            "已经用过的，最保守。")
+            "已经用过的，最保守。"))
         self.only_proven.stateChanged.connect(self._fill_unit_combos)
         grid.addWidget(self.only_proven, 2, 0, 1, 3)
 
@@ -214,7 +217,7 @@ class SwapDialog(QDialog):
         combo = QComboBox()
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.NoInsert)
-        combo.lineEdit().setPlaceholderText("输入名字，或从下拉里选")
+        combo.lineEdit().setPlaceholderText(tr("输入名字，或从下拉里选"))
         if none_label is not None:
             combo.addItem(none_label, "")
         completer = combo.completer()
@@ -274,7 +277,7 @@ class SwapDialog(QDialog):
     def _refresh_list(self) -> None:
         group = self.group_box.currentText()
         pool = (self._catalogue.in_group(group)
-                if group and group != "全部分组" else self._catalogue.items)
+                if group and group != tr("全部分组") else self._catalogue.items)
         text = self.search.text().strip()
         self._choices = (self._catalogue.search(text, limit=500) if text
                          else pool[:500])
@@ -282,8 +285,11 @@ class SwapDialog(QDialog):
         for c in self._choices:
             item = QListWidgetItem(c.label())
             item.setToolTip(
-                f"pack#{c.pack_object_id}\n{c.unit}"
-                f"\n将军模式中 {c.uses} 个条目在用")
+                tr("pack#{pack_object_id}\n{unit}\n将军模式中 {uses} 个条目在用",
+                    pack_object_id=c.pack_object_id,
+                    unit=c.unit,
+                    uses=c.uses,
+                ))
             self.list.addItem(item)
 
     def _preselect(self) -> None:
@@ -394,15 +400,18 @@ class SwapDialog(QDialog):
             if 0 <= row < len(self._choices):
                 choice = self._choices[row]
                 return (choice.key, STATE_REUSE,
-                        f"✓ 将换成 pack#{choice.pack_object_id} —— {choice.label()}")
-            return (None, STATE_INVALID, "从上面的列表里选一条，或者填写下面的组合")
+                        tr("✓ 将换成 pack#{pack_object_id} —— {v1}",
+                            pack_object_id=choice.pack_object_id,
+                            v1=choice.label(),
+                        ))
+            return (None, STATE_INVALID, tr("从上面的列表里选一条，或者填写下面的组合"))
 
         unit = self._typed_unit()
         if unit is None:
-            return (None, STATE_INVALID, "先填一个单位名")
+            return (None, STATE_INVALID, tr("先填一个单位名"))
         transporter = self._typed_transporter()
         if transporter is not None and transporter == unit:
-            return (None, STATE_INVALID, "载具不能和单位是同一个")
+            return (None, STATE_INVALID, tr("载具不能和单位是同一个"))
 
         key = PackKey(unit=unit, transporter=transporter,
                       experience=self.xp_box.currentData(), number=1)
@@ -410,17 +419,18 @@ class SwapDialog(QDialog):
         ag_hit = self._catalogue.find_exact(key)
         if ag_hit is not None:
             return (key, STATE_REUSE,
-                    f"✓ 本文件里已有这个组合 —— 将复用 pack#{ag_hit.pack_object_id}"
-                    f"（不新建对象）")
+                    tr("✓ 本文件里已有这个组合 —— 将复用 pack#{pack_object_id}（不新建对象）",
+                        pack_object_id=ag_hit.pack_object_id,
+                    ))
 
         # What ``ensure_pack`` will actually find, which searches the *whole*
         # pack pool rather than only the AG-proven part of it.
         anywhere = self._session.packs.index.find(key)
         if anywhere is not None:
             return (key, STATE_CONFIRM,
-                    f"⚠ 这个组合本文件里只有 pack#{anywhere}，"
-                    f"而且只被 PvP/行动模式引用过 —— 将军模式从未用过它。\n"
-                    f"   仍要使用请确认。")
+                    tr("⚠ 这个组合本文件里只有 pack#{anywhere}，而且只被 PvP/行动模式引用过 —— 将军模式从未用过它。\n   仍要使用请确认。",
+                        anywhere=anywhere,
+                    ))
 
         # The gate is now "is this path in the load order at all" — answered
         # from the mod's ``Unit.ndfbin``, ModGen's baseline, and this file's own
@@ -434,12 +444,9 @@ class SwapDialog(QDialog):
             unknown.append(unit_leaf(transporter))
         if unknown:
             return (key, STATE_CONFIRM,
-                    f"⚠ 这些名字在任何定义文件里都找不到：{' / '.join(unknown)}\n"
-                    f"   已查过：本 mod 的 Unit.ndfbin、原版数据（base.zip）、"
-                    f"以及本文件引用过的全部单位。\n"
-                    f"   如果它是本 mod 后来才定义、而这个编辑器读不到的，"
-                    f"可以继续；否则游戏里会是空装备，而且不会报错。\n"
-                    f"   确定要用吗？")
+                    tr("⚠ 这些名字在任何定义文件里都找不到：{v0}\n   已查过：本 mod 的 Unit.ndfbin、原版数据（base.zip）、以及本文件引用过的全部单位。\n   如果它是本 mod 后来才定义、而这个编辑器读不到的，可以继续；否则游戏里会是空装备，而且不会报错。\n   确定要用吗？",
+                        v0=' / '.join(unknown),
+                    ))
 
         # Known, but never fielded by this file's AG decks — worth saying, not
         # worth blocking.  It is the common case for the units this change
@@ -447,16 +454,19 @@ class SwapDialog(QDialog):
         if unit not in self._ag_units:
             origin = self._universe.origin(unit)
             why = {
-                "原版": "原版单位",
-                "本mod": "本 mod 定义的单位",
-                "本文件": "本文件里有 pack 用它，但都不是将军模式牌组",
-            }.get(origin, "定义文件里查不到来源")
+                tr("原版"): tr("原版单位"),
+                tr("本mod"): tr("本 mod 定义的单位"),
+                tr("本文件"): tr("本文件里有 pack 用它，但都不是将军模式牌组"),
+            }.get(origin, tr("定义文件里查不到来源"))
             return (key, STATE_CREATE,
-                    f"＋ 新组合 —— {unit_leaf(unit)} 是{why}；\n"
-                    f"   本文件的将军模式数据还没引用过它，保存时会新建一个 pack 对象。")
+                    tr("＋ 新组合 —— {v0} 是{why}；\n   本文件的将军模式数据还没引用过它，保存时会新建一个 pack 对象。",
+                        v0=unit_leaf(unit),
+                        why=why,
+                    ))
         return (key, STATE_CREATE,
-                f"＋ 新组合 —— 保存时会新建一个 pack 对象（复用现有的 "
-                f"{unit_leaf(unit)} 与载具）")
+                tr("＋ 新组合 —— 保存时会新建一个 pack 对象（复用现有的 {v0} 与载具）",
+                    v0=unit_leaf(unit),
+                ))
 
     def _evaluate(self) -> None:
         key, state, message = self.evaluate()
@@ -470,7 +480,7 @@ class SwapDialog(QDialog):
         if key.transporter:
             lines.append(f"  Transport   = {key.transporter}")
         lines.append("  Xp          = "
-                     + ("（不写 · 继承师的经验）" if key.experience is None
+                     + (tr("（不写 · 继承师的经验）") if key.experience is None
                         else str(key.experience)))
         self.preview.setText("\n".join(lines))
 
@@ -487,11 +497,11 @@ class SwapDialog(QDialog):
         """
         key, state, message = self.evaluate()
         if key is None:
-            QMessageBox.information(self, "还不能确定", message)
+            QMessageBox.information(self, tr("还不能确定"), message)
             return
         if state == STATE_CONFIRM:
             answer = QMessageBox.warning(
-                self, "需要确认", message + "\n\n继续吗？",
+                self, tr("需要确认"), message + tr("\n\n继续吗？"),
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if answer != QMessageBox.Yes:
                 return
