@@ -29,3 +29,6 @@ venv/
 # documentation for whoever installs it, so they stay local.  `doc/使用教程.md`
 # is the manual and *is* shipped -- the pattern stays deliberately narrow.
 doc/*勘查报告.md
+# Handover briefs for other projects: game-format facts plus one specific
+# mod's figures, same reasoning as the recon reports above — local only.
+doc/移交*.md
