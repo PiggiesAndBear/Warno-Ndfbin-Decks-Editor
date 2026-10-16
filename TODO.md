@@ -819,6 +819,68 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
 
 ---
 
+## 阶段 11 · 将军模式牌组属性编辑（2026-10-16 立项，前置勘查已完成）
+
+> 用户问：给编辑器加「编辑 AG 牌组属性（部队类型 / 移动方式 / 行动点 / 炮兵支援覆盖范围）」
+> 的可行性。报告 `doc/将军模式牌组属性勘查报告.md`（内部文档，gitignore 已挡）。
+> 工具 `tools/probe_pawn.py`。
+>
+> **结论：可行，且比牌组编辑更"安全" —— 但共享模块必须克隆。**
+
+- [x] **T11.1** ✅ **数据勘查**
+      —— ★★ **四个属性一个都不在 `Deck.ndfbin` 里**。那个文件只有编制
+        （5 个类：DeckDescriptor / CombatGroup / SmartGroup / Pack / GroupRules）
+      —— 它们在 **`Gen/NDF/GFX/Pawn.ndfbin`**，作为**模块**挂在一个
+        `TEntityDescriptor` 上，导出名 `Descriptor_Unit_<牌组标识>`
+      —— 宿主模块：部队类型 = `TStrategicLabelModuleDescriptor`（战略图标字符串表）；
+        移动方式 = `TStrategicMovementModuleDescriptor`（6 种描述符之一，**是引用不是枚举**）；
+        行动点 = `TActionPointsModuleDescriptor`（InitialActionPoint / Recovery / ForProducedPawn）；
+        炮兵支援 = `TStrategicBattleModuleDescriptor.BattleSupportRadiusInAPCase`
+      —— ★ **营 ↔ pawn 一一对应 2265/2266 = 100.0%**（唯一落空 `test_deck_avion`）。
+        更稳的键是 pawn 上 `TDeckModuleDescriptor.DeckIdentifier`，不必靠名字猜
+      —— ★ **交叉验证**：471 个营用 `howitzer` 移动，411+36+12+9+3 = 471 个营有正的支援半径
+        —— 两边完全对上，"炮兵 = howitzer + 支援半径"这条读法成立
+- [x] **T11.2** ✅ **量清了共享度（决定改法的那个数）**
+      —— ★★ **编译器把相同模块去重合并**：行动点 48 个对象承载 2265 个营
+        （**平均 47 个营一个**，最常见的 `InitialActionPoint=12` 被 **1638 个营**引用）；
+        移动方式 6 个对象 / 378；战斗角色 11 个 / 206；隐蔽加成 1 个 / **2268**
+      —— ★ 而 **部队类型图标（2265 个对象）、分数、国家/阵营是「一营一对象」→ 可原地改**
+      —— ★ 具体到 595 侦察营：行动点模块被引 **1638** 次、移动方式 **1618** 次
+      —— **结论：3 个属性必须"克隆新模块 + 重指向那个营的 obj_ref"，不可原地改。**
+        这与牌组编辑器已有的 `TDeckPackDescriptor` 共享坑**同型**，可照搬既有纪律
+- [x] **T11.3** ✅ **二进制层已就绪（零逆向风险）**
+      —— `selfcheck` 的 `ALL_BINS` **本来就含 `GFX/Pawn`**，每次回归都在做往返验证
+      —— 实测 **逐字节相同**、主体相同（18,285 对象；解码 0.49 s / 重编码 0.13 s）
+      —— 写新对象用 `cndf_codec.append_graph_objects`（**通用、仅追加、写完自动复验图**）；
+        类/属性 id 查表 `_class_id` / `_prop_id` 也是通用的（按名字查，不绑 pack）
+      —— ★ 共享模块上保留着源码名 `_ShortDatabaseName`（40 个对象，如
+        `StrategicMovementDescriptor_mecanized`）→ 界面可直接显示可读名字
+- [ ] **T11.4** `ndfbin_decks/io/pawn.py`：读 `Pawn.ndfbin`，按 `DeckIdentifier` 建索引，
+      暴露 `pawn → [(module_class, module_obj, shared_factor)]`，与 deck 解耦
+- [ ] **T11.5** `ndfbin_decks/edit/module.py`：**clone-on-write** 写入器 ——
+      改共享模块时追加同类副本（改好值）+ 重指向该营的 `obj_ref`；
+      独有模块（图标 / 分数 / 国家）直接原地改。★ 这一条是整件事的安全边界
+- [ ] **T11.6** UI：选中营时多一个「战略属性」面板（图标下拉 / 移动方式下拉 /
+      行动点 / 支援半径 / 战斗角色），名字用 `_ShortDatabaseName`
+- [ ] **T11.7** 校验器：每个 AG 营有对应 pawn；模块类与字段匹配；数值范围。
+      ★ 按老规矩**先量化发生率**再决定硬/软
+- [ ] **T11.8** 保存：现在 `save()` 只写一个文件 —— 改 pawn 要**写第二个文件**，
+      需要"两个文件一起保存"的流程（各自 `.bak`），并在界面说清改的是哪个文件
+- [ ] **T11.9** 测试：★ 最关键一条是**克隆隔离断言** —— 改一个营的行动点后，
+      断言引用同一模块的另外 1637 个营**一字未变**（与"共享 pack 不被误伤"同型）
+- [ ] **T11.10** ⚠️ **必须实测确认的点**
+      —— `BattleRole` 编译后是 1/2/3，源码枚举是 AuxiliarySupport/Fighter/GroundSupport，
+        **对应关系未验证**（按 471 个 howitzer ≈ 471 个 = 3 推断 3 = GroundSupport）
+      —— 支援半径 `-1.0`（111 个营）的语义未知
+      —— 行动点 12/5/4 与地图距离/地形系数的换算未验证，改动手感需进游戏试
+      —— 26 种战略图标里哪些适合给玩家选（`RTS_H_` 变体语义未知，且牵涉贴图资源）
+      —— `Pawn.ndfbin` 是**整份替换**：改它只影响本 mod，但两个 mod 都改这个文件会互相覆盖
+      —— `Config.ini` 的 `GFX/Pawn=<hash>` 兼容哈希 / `DeckFormatVersion`：与 Deck 同一未解问题
+      —— `Score` 目前 2265 个营**全是 1** → 改它等于"引入差异"而不是"修正不同"，
+        要先查清游戏读它的地方
+
+---
+
 ## 易错点（都是本项目实际踩过的）
 
 | 坑                                        | 后果                                                                                      | 对应任务                                    |
