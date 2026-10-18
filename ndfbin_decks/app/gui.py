@@ -1253,10 +1253,20 @@ class MainWindow(QMainWindow):
         picked = dlg.result()
         if picked is None:
             return
-        scope, from_packs, to_key = picked
-        res = self.session.scoped_replace(scope, from_packs).apply(to_key)
+        scope, pairs = picked
+        # One mapping for the whole batch: applied simultaneously (see
+        # ScopedReplace.apply_mapping), so a row may point at another row's
+        # source without the two cancelling out.
+        mapping = {}
+        for ids, target in pairs:
+            for pack_id in ids:
+                source = self.session.packs.pack_key(pack_id)
+                if source is not None:
+                    mapping[source] = target
+        res = self.session.scoped_replace(scope, -1).apply_mapping(mapping)
         self.session.note_change(res, tr("批量替换"))
-        self._report(res, tr("批量替换（{v0}）", v0=scope.label()))
+        self._report(res, tr("批量替换（{v0} · {v1} 组）",
+                             v0=scope.label(), v1=len(pairs)))
         self._reload()
 
     def on_save(self) -> None:

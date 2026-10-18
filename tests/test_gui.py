@@ -546,7 +546,7 @@ def main() -> int:
                 _Scope(kind="division", division=role20.division,
                        deck_id=did20, ci=role20.ci, si=role20.si,
                        country=_dvm.country_code(role20.division)),
-                from_pack, other.key)
+                [([from_pack], other.key)])
             real_replace = _gm.ReplaceDialog
             try:
                 _gm.ReplaceDialog = _FakeReplace
@@ -712,6 +712,7 @@ def main() -> int:
     print()
     print("=== 9. batch replace: scope widens, counts never move ===")
     from ndfbin_decks.edit.bulk import ScopedReplace, Scope
+    from ndfbin_decks.edit.equip import PackKey
     b0 = next(b for b in s.battalions() if b.deck_object_id == did)
     cat = s.get_catalogue()
     # a pack this battalion actually fields
@@ -907,6 +908,86 @@ def main() -> int:
     check("no hard errors after a many-to-one replace", not v.errors,
           f"{len(v.errors)} errors")
 
+    print("=== 10b-2. many-to-many: one mapping, simultaneous, all-or-nothing ===")
+    # The engine path the table dialog uses.  A mapping is applied in one relay
+    # per deck, so {A:B, B:A} swaps instead of merging — which is exactly what
+    # running the same thing as two single-target replaces cannot do.
+    def window_seq(bat):
+        pool = s.retiler.pool(bat.deck_object_id)
+        out = []
+        for c in bat.companies:
+            for pl in c.platoons:
+                for w in pl.windows:
+                    out.append(s.packs.pack_key(pool[w.pack_index]))
+        return out
+
+    victim = next(b for b in s.battalions()
+                  if len({k for k in window_seq(b) if k is not None}) >= 2)
+    did_v = victim.deck_object_id
+    scope_v = Scope(kind="battalion", deck_id=did_v)
+    before_seq = window_seq(victim)
+    distinct = []
+    for k in before_seq:
+        if k is not None and k not in distinct:
+            distinct.append(k)
+    key_a, key_b = distinct[0], distinct[1]
+    tally_v = s.scoped_replace(scope_v, -1).usage_by_key()
+    check("the scope reports usage by content, not by pack object",
+          key_a in tally_v and key_b in tally_v, str(len(tally_v)))
+
+    res_swap = s.scoped_replace(scope_v, -1).apply_mapping({key_a: key_b,
+                                                           key_b: key_a})
+    check("a swap mapping is accepted", res_swap.ok, res_swap.note)
+    after_seq = window_seq(next(b for b in s.battalions()
+                                if b.deck_object_id == did_v))
+    want = [key_b if k == key_a else key_a if k == key_b else k
+            for k in before_seq]
+    check("A and B really swapped (not merged into one)",
+          after_seq == want,
+          f"{[k.label() if k else None for k in after_seq]}")
+    check("the window count did not move", len(after_seq) == len(before_seq),
+          f"{len(before_seq)} -> {len(after_seq)}")
+    deck_v = next(b for b in s.battalions() if b.deck_object_id == did_v)
+    check("Σ(Number) still equals the pool",
+          deck_v.window_sum == deck_v.pack_count, "W1 broken")
+    check("the result reports one row per pair",
+          len(res_swap.rows) == 2
+          and sum(r.entries for r in res_swap.rows) == res_swap.survey.entries,
+          str([(r.entries, r.units) for r in res_swap.rows]))
+
+    # -- all or nothing ----------------------------------------------------
+    seq_before_refusal = window_seq(next(b for b in s.battalions()
+                                         if b.deck_object_id == did_v))
+    res_noop = s.scoped_replace(scope_v, -1).apply_mapping({key_a: key_a})
+    check("a row whose target is its own source is refused",
+          not res_noop.ok and "相同" in (res_noop.note or ""), res_noop.note)
+    res_ghost = s.scoped_replace(scope_v, -1).apply_mapping(
+        {key_a: key_b, PackKey(unit="$/never/here") : key_a})
+    check("an unused source is refused", not res_ghost.ok,
+          res_ghost.note)
+    check("and the refusal names the row",
+          "第 2 行" in (res_ghost.note or ""), res_ghost.note)
+    check("a refusal writes nothing",
+          window_seq(next(b for b in s.battalions()
+                          if b.deck_object_id == did_v)) == seq_before_refusal,
+          "the deck changed despite the refusal")
+
+    # -- many-to-many that is really many-to-one agrees with apply() -------
+    lost = [k for k in tally_v if k not in (key_a, key_b)][:2]
+    if lost:
+        target_key = key_a
+        res_map = s.scoped_replace(scope_v, -1).apply_mapping(
+            {k: target_key for k in lost})
+        check("a mapping with one target is accepted", res_map.ok, res_map.note)
+        check("it reports the single target id",
+              res_map.to_pack_id is not None, str(res_map.to_pack_id))
+        check("every row moved something",
+              res_map.sources == len(lost), f"{res_map.sources} vs {len(lost)}")
+
+    v = s.validate()
+    check("no hard errors after the mapping tests", not v.errors,
+          f"{len(v.errors)} errors")
+
     print("=== 10c. the replace dialog takes several sources ===")
     dlg_m = rmod.ReplaceDialog(s, scope_of("division"), s.display, win)
     dlg_m.show()
@@ -925,14 +1006,27 @@ def main() -> int:
     check("two rows never name the same equipment",
           len({r["key"] for r in dlg_m._rows}) == len(dlg_m._rows),
           f"{len(dlg_m._rows)} rows")
-    dlg_m._to_key = tgt_key
+    # A ring: each ticked row points at the *next* row's source.  Several
+    # different targets at once is the whole point of the table, and no row
+    # points at itself, so the batch is legal.
+    ticked = dlg_m._ticked_rows_index()
+    ring = [dlg_m._rows[i]["key"] for i in ticked]
+    dlg_m._targets.clear()
+    for n, i in enumerate(ticked):
+        dlg_m._targets[dlg_m._rows[i]["key"]] = ring[(n + 1) % len(ring)]
+    dlg_m._refresh_rows()
     dlg_m._refresh_summary()
     check("with several sources the button is live",
           dlg_m.ok_btn.isEnabled(), dlg_m.summary.text()[:60])
     picked = dlg_m.result()
-    check("the result carries them all",
-          picked is not None and picked[1] == dlg_m._selected(),
+    check("the result carries one pair per ticked row",
+          picked is not None
+          and [pid for ids, _k in picked[1] for pid in ids] == dlg_m._selected(),
           str(picked[1] if picked else None))
+    check("every pair points at a different row's source",
+          picked is not None and len(picked[1]) == len(ring)
+          and all(k != ring[n] for n, (_ids, k) in enumerate(picked[1])),
+          str([k.label() for _ids, k in (picked[1] if picked else [])][:3]))
     dlg_m._set_all(False)
     app.processEvents()
     check("清空 unticks everything", dlg_m._selected() == [],
@@ -948,20 +1042,25 @@ def main() -> int:
     dlg_m._set_all(False)
     app.processEvents()
 
-    # Target among the ticked sources: the dialog says so and waits, rather
-    # than offering to replace a pack with itself.
-    own = dlg_m._rows[0]["ids"][0]
+    # Each row now carries its own target, so "the target is also a source" is
+    # no longer a special case to explain away — but a row that points at its
+    # own source is still a mistake, and the batch is all-or-nothing.
+    own_key = dlg_m._rows[0]["key"]
     dlg_m._checked = set(dlg_m._rows[0]["ids"])
-    dlg_m._to_key = s.packs.pack_key(own)
+    dlg_m._targets.clear()
+    dlg_m._targets[own_key] = own_key
+    dlg_m._refresh_rows()
     dlg_m._refresh_summary()
-    check("the target ticked alone disables the button",
-          not dlg_m.ok_btn.isEnabled(), dlg_m.summary.text()[:50])
+    check("a row pointing at itself disables the button",
+          not dlg_m.ok_btn.isEnabled() and "相同" in dlg_m.summary.text(),
+          dlg_m.summary.text()[:60])
     dlg_m._checked = set(dlg_m._rows[0]["ids"]) | set(dlg_m._rows[1]["ids"])
     dlg_m._refresh_summary()
-    check("with a second source it says the target was excluded",
-          dlg_m.ok_btn.isEnabled() and "剔除" in dlg_m.summary.text(),
-          dlg_m.summary.text()[:70])
+    check("and a ticked row with no target blocks it as well",
+          not dlg_m.ok_btn.isEnabled() and "没有选目标" in dlg_m.summary.text(),
+          dlg_m.summary.text()[:60])
     dlg_m._checked = set()
+    dlg_m._targets.clear()
 
     print()
     print("=== 10d. the search box narrows the list without touching the ticks ===")

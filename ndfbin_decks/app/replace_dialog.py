@@ -63,8 +63,10 @@ class ReplaceDialog(QDialog):
         self._level = scope.kind if scope.kind in LEVELS else "battalion"
         #: pack ids ticked in the left column — a *set*, see the module note
         self._checked: set[int] = set()
-        self._to_key = None
-        self._to_label = ""
+        #: source content key -> target content key.  Keyed by *content*, not by
+        #: row index, so widening the scope keeps the pairings that still exist
+        #: (rows are rebuilt on every level change).
+        self._targets: dict = {}
         #: one row per *kind of equipment*, see :meth:`_reload_from`
         self._rows: list[dict] = []
         #: true while :meth:`_reload_from` fills the list, so the checkbox
@@ -74,19 +76,16 @@ class ReplaceDialog(QDialog):
         root = QVBoxLayout(self)
 
         intro = QLabel(
-            tr("把所选<b>范围</b>内用到左栏装备的每一条，一次性换成右栏装备。<br>"
+            tr("每一行是<b>一组配对</b>：左边这件装备，换成它右边的目标。<br>"
             "<b>件数与槽位顺序不变</b>——游戏仍按原来的数量派兵，只是换了装备；"
-            "因此该操作不会产生非法布局。"))
+            "因此该操作不会产生非法布局。<br>"
+            "所有配对<b>同时生效</b>（不成链），并且<b>要么全部成立、要么一条都不改</b>。"))
         intro.setWordWrap(True)
         root.addWidget(intro)
 
         root.addWidget(self._build_scope_box())
 
-        columns = QHBoxLayout()
-        columns.addLayout(self._build_from_column(), 1)
-        columns.addLayout(self._build_middle(), 0)
-        columns.addLayout(self._build_to_column(), 1)
-        root.addLayout(columns, 1)
+        root.addLayout(self._build_from_column(), 1)
 
         self.summary = QLabel("")
         self.summary.setWordWrap(True)
@@ -163,6 +162,20 @@ class ReplaceDialog(QDialog):
         col.addWidget(self.from_list, 1)
 
         picks = QHBoxLayout()
+        self.to_btn = QPushButton(tr("本行改成…"))
+        self.to_btn.setToolTip(tr("只给选中的这一行选目标"))
+        self.to_btn.clicked.connect(self._on_pick_target)
+        picks.addWidget(self.to_btn)
+        self.fill_btn = QPushButton(tr("统一设为…"))
+        self.fill_btn.setToolTip(
+            tr("给所有已勾选的行选同一个目标 —— 这就是原来\"多对一\"的做法"))
+        self.fill_btn.clicked.connect(self._on_fill_targets)
+        picks.addWidget(self.fill_btn)
+        self.clear_btn = QPushButton(tr("清空目标"))
+        self.clear_btn.setToolTip(tr("保留勾选，清掉所有行的目标"))
+        self.clear_btn.clicked.connect(self._on_clear_targets)
+        picks.addWidget(self.clear_btn)
+        picks.addStretch(1)
         self.all_btn = QPushButton(tr("全选"))
         self.none_btn = QPushButton(tr("清空"))
         # 全选 follows the filter, 清空 never does — stated on the buttons
@@ -236,27 +249,6 @@ class ReplaceDialog(QDialog):
             self._checked.difference_update(ids)
         self._refresh_summary()
 
-    def _build_middle(self) -> QVBoxLayout:
-        col = QVBoxLayout()
-        col.addStretch(1)
-        arrow = QLabel("→")
-        arrow.setAlignment(Qt.AlignCenter)
-        col.addWidget(arrow)
-        col.addStretch(1)
-        return col
-
-    def _build_to_column(self) -> QVBoxLayout:
-        col = QVBoxLayout()
-        col.addWidget(QLabel(tr("<b>换成</b>")))
-        self.to_btn = QPushButton(tr("选择装备…"))
-        self.to_btn.clicked.connect(self._on_pick_target)
-        col.addWidget(self.to_btn)
-        self.to_label = QLabel(tr("<i>尚未选择</i>"))
-        self.to_label.setWordWrap(True)
-        col.addWidget(self.to_label)
-        col.addStretch(1)
-        return col
-
     # -- scope -------------------------------------------------------------
 
     def _level_scope_divisions(self, country: str) -> list:
@@ -309,15 +301,8 @@ class ReplaceDialog(QDialog):
         self._loading = True
         self.from_list.clear()
         for row in self._rows:
-            key, ids = row["key"], row["ids"]
-            name = self.display(key.unit) if key else f"pack#{ids[0]}"
-            bits = [name]
-            if key and key.transporter:
-                bits.append(f"[{self.display(key.transporter)}]")
-            if key and key.experience is not None:
-                bits.append(tr("经验{experience}", experience=key.experience))
-            bits.append(tr("— {v0} 条 / {v1} 件", v0=row['entries'], v1=row['units']))
-            item = QListWidgetItem(" ".join(bits))
+            ids = row["ids"]
+            item = QListWidgetItem(self._row_text(row))
             item.setData(Qt.UserRole, tuple(ids))
             shown = "、".join(f"pack#{p}" for p in ids[:4])
             if len(ids) > 4:
@@ -348,25 +333,91 @@ class ReplaceDialog(QDialog):
 
     # -- target ------------------------------------------------------------
 
-    def _on_pick_target(self) -> None:
-        row = self.from_list.currentRow()
-        current = None
-        if 0 <= row < len(self._rows):
-            current = self._rows[row]["key"]
+    def _row_text(self, row: dict) -> str:
+        """``source — 条/件 → target``.  One pairing per line."""
+        key, ids = row["key"], row["ids"]
+        name = self.display(key.unit) if key else f"pack#{ids[0]}"
+        bits = [name]
+        if key and key.transporter:
+            bits.append(f"[{self.display(key.transporter)}]")
+        if key and key.experience is not None:
+            bits.append(tr("经验{experience}", experience=key.experience))
+        bits.append(tr("— {v0} 条 / {v1} 件", v0=row["entries"], v1=row["units"]))
+        target = self._targets.get(key) if key is not None else None
+        bits.append("→")
+        bits.append(self._target_name(target) if target is not None
+                    else tr("（未选目标）"))
+        return " ".join(bits)
+
+    def _target_name(self, key) -> str:
+        text = self.display(key.unit)
+        if key.transporter:
+            text += f" [{self.display(key.transporter)}]"
+        text += (tr(" 经验{experience}", experience=key.experience)
+                 if key.experience is not None else tr(" 继承经验"))
+        return text
+
+    def _refresh_row(self, index: int) -> None:
+        item = self.from_list.item(index)
+        if item is None or not (0 <= index < len(self._rows)):
+            return
+        # ``setText`` emits ``itemChanged`` just like a tick does, and
+        # ``_on_check`` reads the *check state*: repainting an unticked row
+        # would therefore drop its ids from ``_checked`` and silently shrink
+        # the request.  Mute the callback while repainting.
+        was = self._loading
+        self._loading = True
+        try:
+            item.setText(self._row_text(self._rows[index]))
+        finally:
+            self._loading = was
+
+    def _refresh_rows(self) -> None:
+        for i in range(min(self.from_list.count(), len(self._rows))):
+            self._refresh_row(i)
+
+    def _ask_target(self, current=None):
         dlg = SwapDialog(self.session, current, self)
         dlg.setWindowTitle(tr("选择替换用的装备"))
         if dlg.exec() != QDialog.Accepted:
+            return None
+        return dlg.chosen()
+
+    def _ticked_rows_index(self) -> list[int]:
+        return [i for i, row in enumerate(self._rows)
+                if any(p in self._checked for p in row["ids"])]
+
+    def _on_pick_target(self) -> None:
+        """Give **the current row** a target of its own."""
+        index = self.from_list.currentRow()
+        if not (0 <= index < len(self._rows)):
             return
-        key = dlg.chosen()
+        row = self._rows[index]
+        key = self._ask_target(row["key"])
+        if key is None or row["key"] is None:
+            return
+        self._targets[row["key"]] = key
+        self._refresh_row(index)
+        self._refresh_summary()
+
+    def _on_fill_targets(self) -> None:
+        """Give every ticked row the same target — the old many-to-one."""
+        indexes = self._ticked_rows_index()
+        if not indexes:
+            return
+        key = self._ask_target(self._rows[indexes[0]]["key"])
         if key is None:
             return
-        self._to_key = key
-        self._to_label = (f"{self.display(key.unit)}"
-                          + (f" [{self.display(key.transporter)}]"
-                             if key.transporter else "")
-                          + (tr(" 经验{experience}", experience=key.experience)
-                             if key.experience is not None else tr(" 继承经验")))
-        self.to_label.setText(self._to_label)
+        for index in indexes:
+            source = self._rows[index]["key"]
+            if source is not None:
+                self._targets[source] = key
+        self._refresh_rows()
+        self._refresh_summary()
+
+    def _on_clear_targets(self) -> None:
+        self._targets.clear()
+        self._refresh_rows()
         self._refresh_summary()
 
     # -- summary -----------------------------------------------------------
@@ -401,42 +452,68 @@ class ReplaceDialog(QDialog):
                     tr("{v0} 种装备，已勾选 {v1} 种", v0=total, v1=ticked))
         else:
             self.from_count.setText(tr("范围内没有装备"))
+
         picked = self._selected()
-        if not picked or self._to_key is None:
+        if not picked:
             self.summary.setText(
-                tr("勾选左侧装备（可多选）与右侧目标后显示影响范围。"))
+                tr("勾选左侧装备（可多选），再给每一行选目标后显示影响范围。"))
             self.ok_btn.setEnabled(False)
             return
-        # Matched by content, not by id — see ScopedReplace.apply.  A file can
-        # hold two pack objects with the same signature, and the one the target
-        # resolves to need not be the one this row stands for.
-        sources = [p for p in picked
-                   if self.session.packs.pack_key(p) != self._to_key]
-        if not sources:
+
+        # Every ticked row must carry a target, and no row may point at itself.
+        # A batch is all-or-nothing, so the summary states the refusal instead
+        # of quietly leaving those rows out of the count.
+        indexes = self._ticked_rows_index()
+        missing = [i + 1 for i in indexes
+                   if self._rows[i]["key"] is None
+                   or self._targets.get(self._rows[i]["key"]) is None]
+        if missing:
             self.summary.setText(
-                tr("勾选的装备就是目标本身，无需替换。")
-                if len(picked) == 1 else
-                tr("勾选的装备里只有目标本身，其余没有可替换的来源。"))
+                tr("<b>第 {v0} 行还没有选目标</b>　——　整体不会执行。",
+                   v0="、".join(str(i) for i in missing[:6])))
             self.ok_btn.setEnabled(False)
             return
+        same = [i + 1 for i in indexes
+                if self._targets[self._rows[i]["key"]] == self._rows[i]["key"]]
+        if same:
+            self.summary.setText(
+                tr("<b>第 {v0} 行的目标与来源相同</b>　——　整体不会执行。",
+                   v0="、".join(str(i) for i in same[:6])))
+            self.ok_btn.setEnabled(False)
+            return
+
+        # The blast radius does not depend on the targets: every ticked row
+        # moves all of its entries, so the union of their pack ids is exactly
+        # what will be rewritten.
         executor = self.session.scoped_replace(
-            self._scope_for(self._level), sources)
-        survey = executor.survey(sources)
-        excluded = len(sources) != len(picked)
+            self._scope_for(self._level), picked)
+        survey = executor.survey(picked)
         self.summary.setText(
-            tr("<b>影响范围</b>：{v0}<br>件数与槽位顺序保持不变；共改写 {v1} 个营。",
+            tr("<b>影响范围</b>：{v0}<br>件数与槽位顺序保持不变；共改写 {v1} 个营。"
+               "<br>本次是 <b>{v2} 组</b> 配对，同时生效（不成链）。",
                 v0=survey.summary(),
                 v1=len(survey.decks),
-            )
-            + (tr("<br><i>目标本身也在勾选之列，已从来源中剔除。</i>")
-               if excluded else ""))
+                v2=len(indexes),
+            ))
         self.ok_btn.setEnabled(bool(survey.entries))
 
     # -- result ------------------------------------------------------------
 
-    def result(self) -> tuple[Scope, list[int], object] | None:
-        """``(scope, [from_pack_id, ...], to_key)`` when everything was chosen."""
-        picked = self._selected()
-        if not picked or self._to_key is None:
+    def result(self) -> tuple | None:
+        """``(scope, [(source pack ids, target key), ...])``, one pair per row.
+
+        ``None`` when any ticked row is still missing a target — the caller
+        treats that as "not ready", and the engine refuses the whole mapping
+        anyway.
+        """
+        pairs = []
+        for i in self._ticked_rows_index():
+            row = self._rows[i]
+            target = (self._targets.get(row["key"])
+                      if row["key"] is not None else None)
+            if target is None:
+                return None
+            pairs.append((list(row["ids"]), target))
+        if not pairs:
             return None
-        return self._scope_for(self._level), picked, self._to_key
+        return self._scope_for(self._level), pairs

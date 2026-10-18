@@ -133,6 +133,31 @@ class ReplaceSurvey:
 
 
 @dataclass
+class ReplaceRow:
+    """One source→target pair, as the dialog showed it.
+
+    Keyed by *content* (:class:`~.equip.PackKey`) rather than by pack object id:
+    a file routinely carries several pack objects with the same signature, and
+    a row stands for the equipment, not for one of its objects.
+    """
+
+    source_key: PackKey | None = None
+    target_key: PackKey | None = None
+    #: every pack object the source resolved to in scope
+    source_ids: list[int] = field(default_factory=list)
+    target_id: int = -1
+    reused: bool = True
+    entries: int = 0
+    units: int = 0
+    note: str = ""
+
+    def describe(self) -> str:
+        src = self.source_key.label() if self.source_key else "?"
+        dst = self.target_key.label() if self.target_key else "?"
+        return f"{src} → {dst}"
+
+
+@dataclass
 class ReplaceResult:
     ok: bool = False
     note: str = ""
@@ -147,10 +172,22 @@ class ReplaceResult:
     target_also_a_source: bool = False
     #: how many source packs actually moved something
     sources: int = 0
+    #: one entry per pair, in the order the caller gave them
+    rows: list[ReplaceRow] = field(default_factory=list)
 
     def summary(self) -> str:
         if not self.ok:
             return self.note or tr("未执行")
+        if len(self.rows) > 1:
+            created = len({r.target_id for r in self.rows if not r.reused})
+            bits = [tr("{v1} 组装备 · {entries} 条 · {units} 件单位",
+                       v1=len(self.rows),
+                       entries=self.survey.entries,
+                       units=self.survey.units),
+                    tr("（{v0} 个营）", v0=len(self.decks))]
+            if created:
+                bits.append(tr("新建 {v0} 个 pack", v0=created))
+            return "，".join(bits)
         bits = [tr("{entries} 条装备 → pack#{to_pack_id}",
             entries=self.survey.entries,
             to_pack_id=self.to_pack_id,
@@ -307,66 +344,192 @@ class ScopedReplace:
 
     # -- writing -----------------------------------------------------------
 
-    def apply(self, to_key: PackKey) -> ReplaceResult:
-        """Repoint every in-scope window at a pack offering ``to_key``."""
+    def usage_by_key(self) -> dict:
+        """``{content key: (entries, units)}`` for what the scope fields."""
+        out: dict = {}
+        for _did, _ci, _si, _ei, pid, count in self._in_scope_all():
+            key = self.packs.pack_key(pid)
+            if key is None:
+                continue
+            row = out.setdefault(key, [0, 0])
+            row[0] += 1
+            row[1] += count
+        return {k: (v[0], v[1]) for k, v in out.items()}
+
+    def _mixed_decks(self, deck_ids: set[int]) -> list[str]:
+        """Decks in *deck_ids* whose windows mix packs (W3), by name.
+
+        ``Retiler.relay`` refuses such a window, and it must: re-laying it would
+        collapse the window onto its first pack and delete the rest.  A batch is
+        all-or-nothing, so these are looked for *before* the first write instead
+        of being discovered halfway through.
+        """
+        out: list[str] = []
+        for obj in self.deck.info["objects"]:
+            if obj["class"] != "TDeckDescriptor" or obj["id"] not in deck_ids:
+                continue
+            props = self.deck._props(obj)
+            pool = [it.get("object_id") for it in
+                    props.get("DeckPackList", {}).get("items", []) or []]
+            mixed = False
+            for cg_ref in props.get("DeckCombatGroupList", {}).get("items", []) or []:
+                cg = self.deck._by_id.get(cg_ref.get("object_id"))
+                if cg is None:
+                    continue
+                for sg_ref in (self.deck._props(cg).get("SmartGroupList", {})
+                               .get("items", []) or []):
+                    sg = self.deck._by_id.get(sg_ref.get("object_id"))
+                    if sg is None:
+                        continue
+                    for tup in (self.deck._props(sg)
+                                .get("PackIndexUnitNumberList", {})
+                                .get("items", []) or []):
+                        start = tup.get("key", {}).get("value")
+                        count = tup.get("value", {}).get("value") or 0
+                        if start is None:
+                            continue
+                        seen = {pool[s] for s in range(start, start + count)
+                                if 0 <= s < len(pool)}
+                        if len(seen) > 1:
+                            mixed = True
+                            break
+                    if mixed:
+                        break
+                if mixed:
+                    break
+            if mixed:
+                out.append(self.retiler._deck_name(obj["id"]))
+        return out
+
+    def apply_mapping(self, mapping: dict) -> ReplaceResult:
+        """Repoint every in-scope window according to ``{source: target}``.
+
+        **Simultaneous, not chained.**  Each window is looked up by the pack it
+        holds *now*, and the whole deck is re-laid in one ``relay`` call, so
+        ``{A: B, B: A}`` swaps the two.  Running the same thing as two
+        single-target replaces merges them instead: the first pass moves every A
+        onto B, the second moves them all back onto A, and the distinction
+        between the two types is gone.
+
+        **All or nothing.**  Every row is checked before anything is written — a
+        source the scope never uses, a row that would change nothing, a deck
+        carrying a mixed window.  If one row fails, nothing is written at all
+        and the note names the row.
+
+        Args:
+            mapping: source content key → target content key.  Both are
+                :class:`~.equip.PackKey`, so two pack objects with the same
+                signature are one row, which is what the dialog lists.
+        """
         res = ReplaceResult()
-        res.survey = self.survey()
-        if not res.survey.entries:
-            res.note = tr("范围内没有用到该装备，无需替换")
+        rows = [ReplaceRow(source_key=src, target_key=dst)
+                for src, dst in mapping.items()]
+        res.rows = rows
+        if not rows:
+            res.note = tr("没有要替换的装备")
             return res
 
-        to_pack_id, reused = self.packs.ensure_pack(to_key)
-        if to_pack_id < 0:
-            res.note = tr("无法创建目标装备包")
-            return res
-        res.to_pack_id, res.reused = to_pack_id, reused
-        if not reused:
-            res.created_pack_id = to_pack_id
-
-        # "Fold the others into this one" is the only reading of a target that
-        # is also a source that is not a no-op, so drop it and say so.
-        #
-        # Compared by *content*, not by object id: a file can carry two pack
-        # objects with the same signature, and ``ensure_pack`` resolves the key
-        # to whichever it likes — quite possibly not the one the picker showed.
-        # Asking "is this id the target?" would then miss the case and quietly
-        # rewrite a pack into itself; asking "does this one offer the target?"
-        # is what the user actually meant, and is id-independent.
-        sources = {p for p in self.from_pack_ids
-                   if self.packs.pack_key(p) != to_key}
-        res.target_also_a_source = len(sources) != len(self.from_pack_ids)
-        if not sources:
-            res.note = tr("目标与来源相同")
+        usage = self.usage_by_key()
+        problems: list[str] = []
+        for i, row in enumerate(rows, 1):
+            if row.target_key is None:
+                problems.append(tr("第 {i} 行没有选目标", i=i))
+            elif row.target_key == row.source_key:
+                problems.append(tr("第 {i} 行的目标与来源相同", i=i))
+            elif row.source_key not in usage:
+                problems.append(tr("第 {i} 行的来源在范围内没有用到", i=i))
+        if problems:
+            res.note = "；".join(problems) + tr("　—— 整体未执行")
             return res
 
-        # Re-measured over what will actually move, so the result never
-        # reports the target's own windows as if they had been rewritten.
-        res.survey = self.survey(sources)
-        if not res.survey.entries:
-            res.note = tr("范围内没有用到该装备，无需替换")
-            return res
-        res.sources = res.survey.sources
+        # Collect first, write later: this pass yields the deck set the W3
+        # pre-flight needs, so a refusal still costs nothing.
+        buckets: dict = {}
+        companies: set = set()
+        platoons: set = set()
+        for did, ci, si, ei, pid, count in self._in_scope_all():
+            key = self.packs.pack_key(pid)
+            row = next((r for r in rows if r.source_key == key), None)
+            if row is None:
+                continue
+            bucket = buckets.setdefault(key, {"windows": [], "pids": set(),
+                                              "entries": 0, "units": 0})
+            bucket["windows"].append((did, ci, si, ei))
+            bucket["pids"].add(pid)
+            bucket["entries"] += 1
+            bucket["units"] += count
+            companies.add((did, ci))
+            platoons.add((did, ci, si))
 
-        # Grouped per deck: the relayout is a whole-deck operation, so one
-        # relay per affected battalion is both correct and the minimum work.
-        # Several sources collapse into the same edit map — that is the whole
-        # reason many-to-one costs no more than one-to-one.
+        deck_ids = {did for did, _c, _s, _e, pid, _n in self._in_scope_all()
+                    if self.packs.pack_key(pid) in mapping}
+        mixed = self._mixed_decks(deck_ids)
+        if mixed:
+            res.note = tr("这些营里有混合窗口，重排会删掉装备，已整体拒绝：{v0}",
+                          v0="、".join(mixed[:5]))
+            return res
+
+        target_ids: dict = {}
+        for row in rows:
+            pack_id, reused = self.packs.ensure_pack(row.target_key)
+            if pack_id < 0:
+                res.note = tr("无法创建目标装备包：{v0}", v0=row.target_key.label())
+                return res
+            target_ids[row.target_key] = pack_id
+            row.target_id, row.reused = pack_id, reused
+        res.to_pack_id = (next(iter(target_ids.values()))
+                          if len(target_ids) == 1 else None)
+        res.reused = all(row.reused for row in rows)
+
         per_deck: dict[int, dict[tuple[int, int, int], int]] = {}
-        for did, ci, si, ei, _pid, _count in self._in_scope(frozenset(sources)):
-            per_deck.setdefault(did, {})[(ci, si, ei)] = to_pack_id
+        for row in rows:
+            bucket = buckets.get(row.source_key)
+            if bucket is None:
+                continue
+            row.source_ids = sorted(bucket["pids"])
+            row.entries, row.units = bucket["entries"], bucket["units"]
+            target = target_ids[row.target_key]
+            for did, ci, si, ei in bucket["windows"]:
+                per_deck.setdefault(did, {})[(ci, si, ei)] = target
+            res.created_pack_id = res.created_pack_id or (
+                None if row.reused else row.target_id)
 
         for did, edits in per_deck.items():
             out = self.retiler.relay(did, pack_edits=edits)
             if not out.ok:
+                done = len(res.decks)
                 res.note = f"{self.retiler._deck_name(did)}: {out.note}"
+                if done:
+                    res.note += tr("（已写入 {v0} 个营，其余未动）", v0=done)
                 return res
             res.decks.append(self.retiler._deck_name(did))
 
-        # The relayout changed pools and pair lists; every derived view (the
-        # battalion tree, the catalogue's usage counts) must be rebuilt — but
-        # only for the decks actually rewritten.  ``per_deck`` is exactly that
-        # set, and a country-wide replace can touch a hundred decks while
-        # leaving 2100 alone.
+        res.survey = ReplaceSurvey(
+            decks=set(per_deck), companies=len(companies),
+            platoons=len(platoons), entries=sum(r.entries for r in rows),
+            units=sum(r.units for r in rows), sources=len(rows))
+        res.sources = len([r for r in rows if r.entries])
+        # Only the decks actually rewritten lose their cached tree.
         self.deck.invalidate(set(per_deck))
         res.ok = True
+        return res
+
+    def apply(self, to_key: PackKey) -> ReplaceResult:
+        """The many-to-one shortcut: fold every source into ``to_key``.
+
+        A source that already offers ``to_key`` is *dropped*, not refused —
+        "make all of these into that one" includes the one that is already it —
+        and the drop is reported through
+        :attr:`ReplaceResult.target_also_a_source`.  :meth:`apply_mapping`
+        refuses such a row instead, because there the user wrote that pair
+        deliberately and a row that changes nothing is a mistake.
+        """
+        keys = [self.packs.pack_key(p) for p in self.from_pack_ids]
+        keys = [k for k in keys if k is not None]
+        dropped = any(k == to_key for k in keys)
+        mapping = {k: to_key for k in keys if k != to_key}
+        res = self.apply_mapping(mapping)
+        res.target_also_a_source = dropped
+        if not mapping:
+            res.note = tr("目标与来源相同")
         return res
