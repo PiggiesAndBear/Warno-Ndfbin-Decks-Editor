@@ -771,13 +771,13 @@ def main() -> int:
           [b.text() for b in dlg._level_btns.values()]
           == ["本排 Pl", "本连 Co", "本营 Bn", "本师 Div", "本国 Nat"],
           str([b.text() for b in dlg._level_btns.values()]))
-    check("the from list is populated", dlg.from_list.count() > 0,
-          f"{dlg.from_list.count()} kinds")
-    n_bn = dlg.from_list.count()
+    check("the from list is populated", dlg.rows_table.rowCount() > 0,
+          f"{dlg.rows_table.rowCount()} kinds")
+    n_bn = dlg.rows_table.rowCount()
     dlg._apply_level("division")
     app.processEvents()
     check("widening to the division shows more equipment",
-          dlg.from_list.count() >= n_bn, f"{n_bn} -> {dlg.from_list.count()}")
+          dlg.rows_table.rowCount() >= n_bn, f"{n_bn} -> {dlg.rows_table.rowCount()}")
 
     # The country level: one press covers every division of the same country.
     # The Scope carries the country, exactly as ``on_replace`` builds it — a
@@ -799,12 +799,12 @@ def main() -> int:
     check("with one, the 本国 button is enabled", country_btn.isEnabled())
     check("and its tooltip names the country and its size",
           code in country_btn.toolTip(), country_btn.toolTip()[:60])
-    n_div = dlg_c.from_list.count()
+    n_div = dlg_c.rows_table.rowCount()
     dlg_c._apply_level("country")
     app.processEvents()
     check("widening to the country reaches at least as far as the division",
-          dlg_c.from_list.count() >= n_div > 0,
-          f"{n_div} -> {dlg_c.from_list.count()}")
+          dlg_c.rows_table.rowCount() >= n_div > 0,
+          f"{n_div} -> {dlg_c.rows_table.rowCount()}")
     check("the scope label says so",
           dlg_c.scope_label.text() == "当前：本国 Nat",
           dlg_c.scope_label.text())
@@ -992,9 +992,9 @@ def main() -> int:
     dlg_m = rmod.ReplaceDialog(s, scope_of("division"), s.display, win)
     dlg_m.show()
     app.processEvents()
-    take = min(3, dlg_m.from_list.count())
+    take = min(3, dlg_m.rows_table.rowCount())
     for r in range(take):
-        dlg_m.from_list.item(r).setCheckState(Qt.Checked)
+        dlg_m.rows_table.item(r, 0).setCheckState(Qt.Checked)
     app.processEvents()
     check("ticking several rows selects several kinds",
           dlg_m._ticked_rows() == take, str(dlg_m._ticked_rows()))
@@ -1037,8 +1037,8 @@ def main() -> int:
     dlg_m._set_all(True)
     app.processEvents()
     check("全选 ticks and records every row",
-          dlg_m._ticked_rows() == dlg_m.from_list.count(),
-          f"{dlg_m._ticked_rows()} of {dlg_m.from_list.count()}")
+          dlg_m._ticked_rows() == dlg_m.rows_table.rowCount(),
+          f"{dlg_m._ticked_rows()} of {dlg_m.rows_table.rowCount()}")
     dlg_m._set_all(False)
     app.processEvents()
 
@@ -1067,11 +1067,11 @@ def main() -> int:
     dlg_s = rmod.ReplaceDialog(s, scope_of("division"), s.display, win)
     dlg_s.show()
     app.processEvents()
-    total_rows = dlg_s.from_list.count()
+    total_rows = dlg_s.rows_table.rowCount()
     check("the search box starts empty and hides nothing",
           dlg_s.from_search.text() == "" and dlg_s._visible_rows() == total_rows,
           f"{dlg_s._visible_rows()}/{total_rows} visible")
-    needle = dlg_s.from_list.item(0).text()[:12]
+    needle = dlg_s.rows_table.item(0, 1).text()[:12]
     dlg_s.from_search.setText(needle)
     app.processEvents()
     # Deliberately *not* named ``shown``: this function already has one of
@@ -1081,9 +1081,9 @@ def main() -> int:
     check("typing hides the rows that do not match",
           0 < matched < total_rows, f"{matched}/{total_rows} for {needle!r}")
     check("and every row still visible really contains it",
-          all(needle.lower() in dlg_s.from_list.item(r).text().lower()
+          all(needle.lower() in dlg_s.rows_table.item(r, 1).text().lower()
               for r in range(total_rows)
-              if not dlg_s.from_list.item(r).isHidden()),
+              if not dlg_s.rows_table.isRowHidden(r)),
           f"{matched} visible")
     check("the counter owns up to the filter",
           f"筛选出 {matched} / {total_rows}" in dlg_s.from_count.text(),
@@ -1096,12 +1096,12 @@ def main() -> int:
     dlg_s.from_search.setText("")
     app.processEvents()
     last = total_rows - 1
-    dlg_s.from_list.item(last).setCheckState(Qt.Checked)
+    dlg_s.rows_table.item(last, 0).setCheckState(Qt.Checked)
     app.processEvents()
     picked_before = list(dlg_s._selected())
     dlg_s.from_search.setText(needle)
     app.processEvents()
-    hidden_last = dlg_s.from_list.item(last).isHidden()
+    hidden_last = dlg_s.rows_table.isRowHidden(last)
     check("a tick on a filtered-away row survives, and is still counted",
           hidden_last and dlg_s._selected() == picked_before
           and dlg_s._ticked_rows() == 1,
@@ -1112,9 +1112,9 @@ def main() -> int:
     dlg_s._set_all(True)
     app.processEvents()
     check("全选 takes every row the filter is showing",
-          all(dlg_s.from_list.item(r).checkState() == Qt.Checked
+          all(dlg_s.rows_table.item(r, 0).checkState() == Qt.Checked
               for r in range(total_rows)
-              if not dlg_s.from_list.item(r).isHidden()),
+              if not dlg_s.rows_table.isRowHidden(r)),
           f"{dlg_s._visible_rows()} visible, all ticked")
     check("and leaves the filtered-away tick alone",
           dlg_s._ticked_rows() == dlg_s._visible_rows() + 1,

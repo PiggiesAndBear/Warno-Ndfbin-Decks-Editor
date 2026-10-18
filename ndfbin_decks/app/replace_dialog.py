@@ -39,8 +39,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QDialog, QDialogButtonBox, QGroupBox, QHBoxLayout,
+    QHeaderView, QLabel, QLineEdit, QPushButton, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 # ``LEVEL_LABELS`` comes from the same module as ``LEVELS``: a second copy was
@@ -151,15 +152,30 @@ class ReplaceDialog(QDialog):
                "匹配整行文字：装备名、运输载具、经验等级都算。"))
         self.from_search.textChanged.connect(self._apply_filter)
         col.addWidget(self.from_search)
-        self.from_list = QListWidget()
-        self.from_list.setAlternatingRowColors(True)
-        # Selection still tracks one row — the target picker uses it to open on
-        # something sensible — but it is the *checkbox* that decides what a
-        # replace will touch.
-        self.from_list.currentItemChanged.connect(
+        # A real table, not a list with the target glued onto the text: the
+        # counts and the target have to line up column-wise or "which row is
+        # this target for" is guesswork once there are more than three rows.
+        self.rows_table = QTableWidget(0, 5)
+        self.rows_table.setHorizontalHeaderLabels(
+            ("", tr("来源"), tr("条 / 件"), tr("换成"), ""))
+        self.rows_table.verticalHeader().setVisible(False)
+        self.rows_table.setAlternatingRowColors(True)
+        self.rows_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.rows_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.rows_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.rows_table.setWordWrap(False)
+        head = self.rows_table.horizontalHeader()
+        head.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        head.setSectionResizeMode(1, QHeaderView.Stretch)
+        head.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        head.setSectionResizeMode(3, QHeaderView.Stretch)
+        head.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        # Selection still tracks one row — the per-row button acts on it — but
+        # it is the *checkbox* that decides what a replace will touch.
+        self.rows_table.itemChanged.connect(self._on_check)
+        self.rows_table.currentCellChanged.connect(
             lambda *_: self._refresh_summary())
-        self.from_list.itemChanged.connect(self._on_check)
-        col.addWidget(self.from_list, 1)
+        col.addWidget(self.rows_table, 1)
 
         picks = QHBoxLayout()
         self.to_btn = QPushButton(tr("本行改成…"))
@@ -204,13 +220,15 @@ class ReplaceDialog(QDialog):
             # filter.  Leaving hidden rows ticked would keep a number on screen
             # that the user has no way to see, let alone clear.
             self._checked.clear()
-        for row in range(self.from_list.count()):
-            item = self.from_list.item(row)
-            if on and item.isHidden():
+        for row in range(self.rows_table.rowCount()):
+            if on and self.rows_table.isRowHidden(row):
                 continue
-            item.setCheckState(Qt.Checked if on else Qt.Unchecked)
+            cell = self.rows_table.item(row, 0)
+            if cell is None:
+                continue
+            cell.setCheckState(Qt.Checked if on else Qt.Unchecked)
             if on:
-                self._checked.update(item.data(Qt.UserRole))
+                self._checked.update(cell.data(Qt.UserRole) or ())
         self._loading = False
         self._refresh_summary()
 
@@ -218,31 +236,32 @@ class ReplaceDialog(QDialog):
         """Hide the rows the search box does not match.
 
         Nothing is ticked or unticked here — see the module docstring.  The
-        current row *is* moved, because the target picker opens on it and
-        opening on a row the user cannot see would pick the wrong equipment.
+        current row *is* moved, because the per-row button acts on it and
+        acting on a row the user cannot see would hit the wrong equipment.
         """
         needle = self.from_search.text().strip().lower()
         first_visible = -1
-        for row in range(self.from_list.count()):
-            item = self.from_list.item(row)
-            hit = not needle or needle in item.text().lower()
-            item.setHidden(not hit)
+        for row in range(self.rows_table.rowCount()):
+            source = self.rows_table.item(row, 1)
+            text = source.text().lower() if source is not None else ""
+            hit = not needle or needle in text
+            self.rows_table.setRowHidden(row, not hit)
             if hit and first_visible < 0:
                 first_visible = row
-        current = self.from_list.currentRow()
+        current = self.rows_table.currentRow()
         if first_visible >= 0 and (
-                current < 0 or self.from_list.item(current).isHidden()):
-            self.from_list.setCurrentRow(first_visible)
+                current < 0 or self.rows_table.isRowHidden(current)):
+            self.rows_table.setCurrentCell(first_visible, 1)
         self._refresh_summary()
 
     def _visible_rows(self) -> int:
-        return sum(1 for row in range(self.from_list.count())
-                   if not self.from_list.item(row).isHidden())
+        return sum(1 for row in range(self.rows_table.rowCount())
+                   if not self.rows_table.isRowHidden(row))
 
-    def _on_check(self, item: QListWidgetItem) -> None:
-        if self._loading:
+    def _on_check(self, item: QTableWidgetItem) -> None:
+        if self._loading or item is None or item.column() != 0:
             return
-        ids = item.data(Qt.UserRole)
+        ids = item.data(Qt.UserRole) or ()
         if item.checkState() == Qt.Checked:
             self._checked.update(ids)
         else:
@@ -299,33 +318,16 @@ class ReplaceDialog(QDialog):
         self._rows = groups
 
         self._loading = True
-        self.from_list.clear()
-        for row in self._rows:
-            ids = row["ids"]
-            item = QListWidgetItem(self._row_text(row))
-            item.setData(Qt.UserRole, tuple(ids))
-            shown = "、".join(f"pack#{p}" for p in ids[:4])
-            if len(ids) > 4:
-                shown += tr(" 等 {v0} 个", v0=len(ids))
-            item.setToolTip(tr("{shown}\n范围内 {v1} 条装备，共 {v2} 件",
-                shown=shown,
-                v1=row['entries'],
-                v2=row['units'],
-            ))
-            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-            # Carried across a change of level: widening the scope from 营 to
-            # 师 keeps ticking whatever is still there, so the user widens a
-            # request instead of rebuilding it.
-            item.setCheckState(
-                Qt.Checked if any(p in self._checked for p in ids)
-                else Qt.Unchecked)
-            self.from_list.addItem(item)
+        self.rows_table.setRowCount(0)
+        self.rows_table.setRowCount(len(self._rows))
+        for index, row in enumerate(self._rows):
+            self._fill_row(index, row)
         self._loading = False
         # Anything the narrower scope had ticked but this one does not field
         # stays in ``_checked``; dropping it here would silently shrink the
         # request, and re-surveying would not notice.
         if self._rows:
-            self.from_list.setCurrentRow(0)
+            self.rows_table.setCurrentCell(0, 1)
         # The list is brand new, so the filter has to be laid over it again.
         # The search text itself is deliberately kept: widening the scope from
         # 营 to 师 should not also throw away the name being hunted for.
@@ -333,34 +335,64 @@ class ReplaceDialog(QDialog):
 
     # -- target ------------------------------------------------------------
 
-    def _row_text(self, row: dict) -> str:
-        """``source — 条/件 → target``.  One pairing per line."""
+    def _source_text(self, row: dict) -> str:
+        """What this row replaces: name, transporter, experience."""
         key, ids = row["key"], row["ids"]
-        name = self.display(key.unit) if key else f"pack#{ids[0]}"
-        bits = [name]
+        text = self.display(key.unit) if key else f"pack#{ids[0]}"
         if key and key.transporter:
-            bits.append(f"[{self.display(key.transporter)}]")
+            text += f"  [{self.display(key.transporter)}]"
         if key and key.experience is not None:
-            bits.append(tr("经验{experience}", experience=key.experience))
-        bits.append(tr("— {v0} 条 / {v1} 件", v0=row["entries"], v1=row["units"]))
-        target = self._targets.get(key) if key is not None else None
-        bits.append("→")
-        bits.append(self._target_name(target) if target is not None
-                    else tr("（未选目标）"))
-        return " ".join(bits)
-
-    def _target_name(self, key) -> str:
-        text = self.display(key.unit)
-        if key.transporter:
-            text += f" [{self.display(key.transporter)}]"
-        text += (tr(" 经验{experience}", experience=key.experience)
-                 if key.experience is not None else tr(" 继承经验"))
+            text += tr("经验{experience}", experience=key.experience)
         return text
 
+    def _count_text(self, row: dict) -> str:
+        return tr("{v0} 条 / {v1} 件", v0=row["entries"], v1=row["units"])
+
+    def _target_text(self, row: dict) -> str:
+        """What this row becomes, or a placeholder when nothing was picked."""
+        key = row["key"]
+        target = self._targets.get(key) if key is not None else None
+        if target is None:
+            return tr("（未选目标）")
+        text = self.display(target.unit)
+        if target.transporter:
+            text += f"  [{self.display(target.transporter)}]"
+        text += (tr("经验{experience}", experience=target.experience)
+                 if target.experience is not None else tr("继承经验"))
+        return text
+
+    def _fill_row(self, index: int, row: dict) -> None:
+        ids = row["ids"]
+        check = QTableWidgetItem("")
+        check.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable
+                       | Qt.ItemIsUserCheckable)
+        # Carried across a change of level: widening the scope from 营 to 师
+        # keeps ticking whatever is still there, so the user widens a request
+        # instead of rebuilding it.
+        check.setCheckState(
+            Qt.Checked if any(p in self._checked for p in ids) else Qt.Unchecked)
+        check.setData(Qt.UserRole, tuple(ids))
+        shown = "、".join(f"pack#{p}" for p in ids[:4])
+        if len(ids) > 4:
+            shown += tr(" 等 {v0} 个", v0=len(ids))
+        check.setToolTip(tr("{shown}\n范围内 {v1} 条装备，共 {v2} 件",
+                            shown=shown, v1=row["entries"], v2=row["units"]))
+        self.rows_table.setItem(index, 0, check)
+        for col, text in ((1, self._source_text(row)),
+                          (2, self._count_text(row)),
+                          (3, self._target_text(row))):
+            cell = QTableWidgetItem(text)
+            cell.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.rows_table.setItem(index, col, cell)
+        btn = QPushButton(tr("改选…"))
+        btn.setToolTip(tr("给这一行选目标"))
+        btn.clicked.connect(lambda _checked=False, i=index: self._pick_for(i))
+        self.rows_table.setCellWidget(index, 4, btn)
+
     def _refresh_row(self, index: int) -> None:
-        item = self.from_list.item(index)
-        if item is None or not (0 <= index < len(self._rows)):
+        if not (0 <= index < len(self._rows)):
             return
+        row = self._rows[index]
         # ``setText`` emits ``itemChanged`` just like a tick does, and
         # ``_on_check`` reads the *check state*: repainting an unticked row
         # would therefore drop its ids from ``_checked`` and silently shrink
@@ -368,12 +400,17 @@ class ReplaceDialog(QDialog):
         was = self._loading
         self._loading = True
         try:
-            item.setText(self._row_text(self._rows[index]))
+            for col, text in ((1, self._source_text(row)),
+                              (2, self._count_text(row)),
+                              (3, self._target_text(row))):
+                cell = self.rows_table.item(index, col)
+                if cell is not None:
+                    cell.setText(text)
         finally:
             self._loading = was
 
     def _refresh_rows(self) -> None:
-        for i in range(min(self.from_list.count(), len(self._rows))):
+        for i in range(min(self.rows_table.rowCount(), len(self._rows))):
             self._refresh_row(i)
 
     def _ask_target(self, current=None):
@@ -387,9 +424,8 @@ class ReplaceDialog(QDialog):
         return [i for i, row in enumerate(self._rows)
                 if any(p in self._checked for p in row["ids"])]
 
-    def _on_pick_target(self) -> None:
-        """Give **the current row** a target of its own."""
-        index = self.from_list.currentRow()
+    def _pick_for(self, index: int) -> None:
+        """Give row *index* a target of its own."""
         if not (0 <= index < len(self._rows)):
             return
         row = self._rows[index]
@@ -399,6 +435,10 @@ class ReplaceDialog(QDialog):
         self._targets[row["key"]] = key
         self._refresh_row(index)
         self._refresh_summary()
+
+    def _on_pick_target(self) -> None:
+        """The 本行改成… button: acts on whichever row is selected."""
+        self._pick_for(self.rows_table.currentRow())
 
     def _on_fill_targets(self) -> None:
         """Give every ticked row the same target — the old many-to-one."""

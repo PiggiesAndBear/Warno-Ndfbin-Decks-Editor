@@ -992,9 +992,28 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
       —— 手册 4.4 整节重写：草图、三按钮对照表、「同时生效不成链、A↔B 是互换」、
         整体拒绝的三种提示
       —— `en.json` 279/279（100%），并**清掉 12 条孤儿**（旧文案）
-- [ ] **T14.4** 💡 未做（可选）：真正的 `QTableWidget` 列对齐。
-      目前行内是单行文本（`来源 — 条/件 → 目标`），语义已是"每行一对"，
-      但列没有像素级对齐；要更整齐就换 QTableWidget（纯机械改动）
+- [x] **T14.4** ✅ **真正的表格（列对齐）**
+      —— `from_list`（QListWidget）→ **`rows_table`（QTableWidget，5 列）**：
+        勾选 / 来源 / 条·件 / 换成 / 改选按钮
+      —— `QHeaderView.Stretch` 给「来源」和「换成」，计数与按钮按内容自适应
+      —— 每行尾部一个 `改选…` 按钮（比"先选中行再点上方按钮"直接），
+        `本行改成…` 保留为等价入口
+      —— 交互全部迁到表格：`_set_all` / `_apply_filter`（`setRowHidden`）/
+        `_visible_rows` / `_on_check`（只认第 0 列）
+      —— ★ 上一轮那个 `setText` 触发 `itemChanged` 的坑在表格里同样存在，
+        `_refresh_row` 依旧用 `_loading` 静音
+      —— 测试：`from_list` → `rows_table`（`count()` → `rowCount()`、
+        文字取第 1 列、隐藏用 `isRowHidden`）；10d 的筛选语义断言全部保留
+      —— `en.json` **282/282（100%）**，清掉 5 条孤儿（含两条带前导空格的旧串）
+- [x] **T14.5** ✅ **发布 v0.6**（2026-10-18）
+      —— `dist/Warno Ndfbin Decks Editor v0.6.exe`
+        **37,707,837 B** ｜ md5 `c03dbfd725f6dc76a921779c2fa08aa2`
+      —— 内容 = 批量替换多对多 + 表格列对齐（本阶段全部）
+      —— 流水线照旧；两侧 md5 一致；v0.5 归档到 `dist_0.5/`（同字节未删）
+      —— 从 EXE 二进制里挖到 `rows_table` / `apply_mapping` / `改选…` / `整体未执行` /
+        `QTableWidget`，确认新代码真在包里
+      —— 热启动 **1.3 s**（测两遍；v0.5 是 1.6 s）；新二进制冷启动 4.5 s
+      —— 双环境（PySide6 6.12 / 6.3.2）**15/15 全 PASS**
 
 ---
 
