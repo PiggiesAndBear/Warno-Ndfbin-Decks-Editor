@@ -255,6 +255,47 @@ def main() -> int:
     check("count=0 refused", not res5.ok, res5.note)
 
     print()
+    print("=== 6. an edit expires one cached tree, not all 2266 ===")
+    # Rebuilding every deck's tree after every edit cost about a second.  The
+    # cache is per deck now, and this pins the contract that makes it safe: the
+    # edited deck is rebuilt, every other deck comes back as the same object.
+    src6 = next((p for _label, p in SOURCES if p.is_file()), None)
+    if src6 is None:
+        print("  --   no source available, skipped")
+    else:
+        tmp6 = Path(tempfile.mkdtemp()) / "Deck.ndfbin"
+        shutil.copy(src6, tmp6)
+        d6 = DeckFile(tmp6)
+        r6 = Retiler(d6)
+        before = {b.deck_object_id: b for b in d6.battalions()}
+        target = next(b for b in before.values()
+                      if b.companies and b.companies[0].platoons
+                      and b.companies[0].platoons[0].windows)
+        count = target.companies[0].platoons[0].windows[0].count
+        res6 = r6.set_count(target.deck_object_id, 0, 0, 0, count + 2)
+        after = {b.deck_object_id: b for b in d6.battalions()}
+        rebuilt = [k for k, v in after.items() if before.get(k) is not v]
+        check("the edit succeeded", res6.ok, res6.note)
+        check("only the edited deck was rebuilt",
+              rebuilt == [target.deck_object_id],
+              f"{len(rebuilt)} rebuilt: {rebuilt[:4]}")
+        check("every other deck is still the same object",
+              sum(1 for k, v in after.items() if before.get(k) is v)
+              == len(after) - 1,
+              f"{len(after)} decks")
+        check("the rebuilt deck is internally consistent",
+              after[target.deck_object_id].window_sum
+              == after[target.deck_object_id].pack_count,
+              "Σ != pool")
+        # The safe fallback must stay safe: no ids means "forget everything".
+        d6.invalidate()
+        survivors = [k for k, v in
+                     {b.deck_object_id: b for b in d6.battalions()}.items()
+                     if before.get(k) is v]
+        check("invalidate() with no ids still forgets every tree",
+              survivors == [], f"{len(survivors)} survived")
+
+    print()
     if FAILURES:
         print(f"FAIL — {len(FAILURES)} check(s) failed: {FAILURES}")
         return 1

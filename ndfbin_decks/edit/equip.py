@@ -131,6 +131,8 @@ class SwapResult:
     created_pack_id: int | None = None
     #: how many slots in the whole file point at the old pack object
     blast_radius: int = 0
+    #: which deck was changed, so callers can expire one cached tree
+    deck_object_id: int = -1
     note: str = ""
     #: non-blocking advisories, so the GUI can report it the same way it
     #: reports a :class:`~ndfbin_decks.edit.quantity.RetileResult`
@@ -234,7 +236,8 @@ class DeckEditor:
         and makes a half-converted window unrepresentable.
         """
         res = SwapResult(ok=False, deck=self._name_of(deck_object_id),
-                         slot=-1, after=want)
+                         slot=-1, after=want,
+                         deck_object_id=deck_object_id)
         pool = self.pool_of(deck_object_id)
         deck = next((b for b in self.deck.battalions()
                      if b.deck_object_id == deck_object_id), None)
@@ -306,7 +309,7 @@ class DeckEditor:
                        field: str, value, allow_create: bool) -> SwapResult:
         """Resolve the wanted variant, then swap the entry onto it."""
         res = SwapResult(ok=False, deck=self._name_of(deck_object_id),
-                         slot=-1)
+                         slot=-1, deck_object_id=deck_object_id)
         pool = self.pool_of(deck_object_id)
         deck = next((b for b in self.deck.battalions()
                      if b.deck_object_id == deck_object_id), None)

@@ -267,12 +267,10 @@ module graph, reported the expected version and left no errors — then measures
 the native window title and reads the icon back out of the PE. Only then is
 promoting it to `dist/` a one-line copy.
 
-Measured on the v0.4 build: **1.6 s** warm start, twice.  The v0.3 build
-measured 1.3 s on the same machine, so treat the 0.3 s as noise rather than a
-regression — the payload grew by 1.9 KB.  Disentangling the two is not worth a
-stopwatch: almost all of it is the one-file bundle unpacking itself, and a first
-launch of a freshly copied binary is 5.3 s because Defender scans a file it has
-not seen before.  That is why the number is worth taking twice before believing
+Measured on the v0.5 build: **1.6 s** warm start, twice — the same as v0.4, so
+adding a hand-painted palette costs nothing measurable.  Almost all of it is the
+one-file bundle unpacking itself, and a first launch of a freshly copied binary
+is 4.1 s because Defender scans a file it has not seen before.  That is why the number is worth taking twice before believing
 it.
 
 ## Notes and limitations

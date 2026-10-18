@@ -226,6 +226,7 @@ def main() -> int:
     problems = check_bundled(exe, [
         ("assets/app.ico", "the window icon"),
         ("ndfbin_decks/app/gui", "the GUI itself"),
+        ("ndfbin_decks/app/theme", "the light/dark palette"),
         ("ndfbin_decks/app/swap_dialog", "the equipment picker"),
         ("ndfbin_decks/io/divisions", "the 师/国家 parser"),
         ("ndfbin_decks/io/unit_universe", "the unit universe"),

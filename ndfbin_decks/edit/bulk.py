@@ -363,7 +363,10 @@ class ScopedReplace:
             res.decks.append(self.retiler._deck_name(did))
 
         # The relayout changed pools and pair lists; every derived view (the
-        # battalion tree, the catalogue's usage counts) must be rebuilt.
-        self.deck.invalidate()
+        # battalion tree, the catalogue's usage counts) must be rebuilt — but
+        # only for the decks actually rewritten.  ``per_deck`` is exactly that
+        # set, and a country-wide replace can touch a hundred decks while
+        # leaving 2100 alone.
+        self.deck.invalidate(set(per_deck))
         res.ok = True
         return res

@@ -224,23 +224,54 @@ class DeckFile:
         self.names = localisation.NameResolver(lang=lang)
         self._by_id: dict[int, dict] = {}
         self._packs: dict[int, dict] = {}
-        self._battalions: list[Battalion] | None = None
+        #: One built tree per deck, kept across edits that do not touch it.
+        self._batch: dict[int, Battalion] = {}
+        #: AG deck ids in export-name order; ``None`` until first needed.
+        self._order: list[int] | None = None
         self._skirmish: int = 0
         self.invalidate()
 
     # -- caches ------------------------------------------------------------
-    def invalidate(self) -> None:
+    def invalidate(self, deck_ids=None) -> None:
         """Rebuild indexes so the next read sees the current object graph.
 
-        Also drops the cached :class:`Battalion` tree, which is a *snapshot*:
-        it copies ``PackIndex``/``Number`` out of the graph at build time, so
-        after an edit a stale tree would report the pre-edit ``window_sum``
-        next to the post-edit slot pool.  Every mutating path must call this.
+        The :class:`Battalion` tree is a *snapshot*: it copies
+        ``PackIndex``/``Number`` out of the graph at build time, so a stale tree
+        would report the pre-edit ``window_sum`` next to the post-edit slot
+        pool.  Every mutating path must invalidate — but *how much* is worth
+        choosing, because building all 2266 AG decks costs about a second while
+        one deck costs 6 ms.
+
+        ``deck_ids=None`` forgets every tree: the slow, always-correct answer,
+        and the default for any caller that cannot name what it changed.
+        ``invalidate({id})`` drops just that deck — what an edit should use,
+        since an edit rewrites one deck's pool and pair list.  It deliberately
+        does **not** re-index: nothing an edit does changes the object table, and
+        re-indexing there is what made a 70k-window pass take hours.
+        Appending objects is the one case that needs :meth:`reindex` instead,
+        because the object table itself grew.
+        """
+        if deck_ids is None:
+            self.reindex()
+            self._batch.clear()
+            self._order = None
+            return
+        # A targeted invalidate must stay cheap.  It runs once per deck inside
+        # every re-tile, and re-indexing 61k objects there was enough to turn a
+        # pass over 70k windows from minutes into hours.  Nothing an edit does
+        # changes the object table, so the index cannot be stale.
+        for deck_id in deck_ids:
+            self._batch.pop(deck_id, None)
+
+    def reindex(self) -> None:
+        """Rebuild the object index and the pack lookup from the decoded graph.
+
+        Only needed when the object table itself changed — construction, or a
+        path that appends objects.  Editing a deck's pool or pair list does not.
         """
         self._by_id = {o["id"]: o for o in self.info["objects"]}
         self._packs = {i: self._props(o) for i, o in self._by_id.items()
                        if o["class"] == PACK}
-        self._battalions = None
 
     def _props(self, obj: dict) -> dict:
         return {p["property_name"]: p["value"] for p in obj["properties"]}
@@ -295,13 +326,35 @@ class DeckFile:
         return n
 
     # -- model -------------------------------------------------------------
+    def _ag_deck_ids(self) -> list[int]:
+        """AG deck object ids, ordered by export name."""
+        if self._order is None:
+            pairs = [(self.info["exports"].get(o["id"], "").rsplit("/", 1)[-1],
+                      o["id"])
+                     for o in self.deck_objects()]
+            self._order = [oid for _name, oid in sorted(pairs)]
+        return self._order
+
     def battalions(self) -> list[Battalion]:
-        """Every AG Pawn deck, sorted by export name."""
-        if self._battalions is not None:
-            return self._battalions
-        out = [self._build(o) for o in self.deck_objects()]
-        out.sort(key=lambda b: b.export_name)
-        self._battalions = out
+        """Every AG Pawn deck, sorted by export name.
+
+        Built per deck and cached, so an edit to one deck rebuilds one deck:
+        ``invalidate({id})`` drops just that entry and the rest come back as the
+        same objects.  Rebuilding all of them after every edit cost a second.
+        """
+        out: list[Battalion] = []
+        for deck_id in self._ag_deck_ids():
+            built = self._batch.get(deck_id)
+            if built is None:
+                obj = self._by_id.get(deck_id)
+                if obj is None:          # the object table moved under us
+                    self.invalidate()
+                    obj = self._by_id.get(deck_id)
+                    if obj is None:
+                        continue
+                built = self._build(obj)
+                self._batch[deck_id] = built
+            out.append(built)
         return out
 
     def _build(self, deck_obj: dict) -> Battalion:

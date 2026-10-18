@@ -128,6 +128,8 @@ class RetileResult:
     note: str = ""
     #: non-blocking advisories, e.g. an official cap that vanilla itself breaks
     warnings: list[str] = field(default_factory=list)
+    #: which deck was re-laid, so callers can expire one cached tree
+    deck_object_id: int = -1
 
     @property
     def moved_windows(self) -> list[Layout]:
@@ -248,7 +250,8 @@ class Retiler:
         ``new_count`` must be >= 1.  The window keeps the pack it already
         points at; the slot pool grows or shrinks by ``ΔN`` copies of it.
         """
-        res = RetileResult(deck=self._deck_name(deck_object_id))
+        res = RetileResult(deck=self._deck_name(deck_object_id),
+                           deck_object_id=deck_object_id)
         if new_count < 1:
             res.note = f"count must be >= 1 (asked for {new_count})"
             return res
@@ -308,7 +311,8 @@ class Retiler:
         still holds by construction — the whole reason a replace needs no
         re-validation dance of its own.
         """
-        res = RetileResult(deck=self._deck_name(deck_object_id))
+        res = RetileResult(deck=self._deck_name(deck_object_id),
+                           deck_object_id=deck_object_id)
         edits = edits or {}
         pack_edits = pack_edits or {}
         groups = self._windows(deck_object_id)
@@ -387,6 +391,11 @@ class Retiler:
                 self._set_pairs(sg_id, pairs, self._window_template(sg_id))
 
         res.pool_after = len(new_pool)
+        # Only this deck's tree is stale: every other deck's pool and pairs are
+        # untouched, and rebuilding all 2266 of them would cost a second per
+        # edit.  Callers that cannot name a deck still fall back to the full
+        # ``invalidate()``.
+        self.deck.invalidate({deck_object_id})
         res.ok = True
         return res
 
@@ -402,7 +411,8 @@ class Retiler:
         cleaner conscience, so this refuses to guess — ``keep_pack`` has to be
         one of the packs the window actually holds.
         """
-        res = RetileResult(deck=self._deck_name(deck_object_id))
+        res = RetileResult(deck=self._deck_name(deck_object_id),
+                           deck_object_id=deck_object_id)
         pool = self.pool(deck_object_id)
         groups = self._windows(deck_object_id)
         try:

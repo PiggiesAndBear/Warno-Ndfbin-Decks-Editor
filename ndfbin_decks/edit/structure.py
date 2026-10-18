@@ -59,6 +59,8 @@ class EntryResult:
     pack_reused: bool = False
     retile: RetileResult | None = None
     warnings: list[str] = field(default_factory=list)
+    #: which deck was changed, so callers can expire one cached tree
+    deck_object_id: int = -1
 
     @property
     def moved_windows(self) -> list[Layout]:
@@ -115,7 +117,7 @@ class StructureEditor:
         (same pipeline the entry-level ``swap_entry`` uses).  Supply exactly one.
         """
         res = EntryResult(deck=self._deck_name(deck_object_id),
-                          action="insert")
+                          action="insert", deck_object_id=deck_object_id)
         if count < 1:
             res.note = f"count must be >= 1 (asked for {count})"
             return res
@@ -163,7 +165,7 @@ class StructureEditor:
         Refused when it is the group's only window — see the module docstring.
         """
         res = EntryResult(deck=self._deck_name(deck_object_id),
-                          action="remove")
+                          action="remove", deck_object_id=deck_object_id)
         groups = self.retiler._windows(deck_object_id)
         try:
             pairs_list = groups[ci][si]

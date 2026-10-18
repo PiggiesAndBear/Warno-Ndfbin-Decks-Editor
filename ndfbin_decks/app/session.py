@@ -26,6 +26,22 @@ from .catalog import PackCatalogue, ag_pack_ids
 from ..i18n import tr
 
 
+def _touched_decks(res) -> set[int] | None:
+    """Deck ids an edit result reports changing, or ``None`` when it cannot say.
+
+    ``None`` means "forget every cached tree" — the slow but always-correct
+    answer, and what any new result type gets until it learns to report ids.
+    """
+    deck_id = getattr(res, "deck_object_id", None)
+    if isinstance(deck_id, int) and deck_id >= 0:
+        return {deck_id}
+    survey = getattr(res, "survey", None)
+    decks = getattr(survey, "decks", None)
+    if decks:
+        return set(decks)
+    return None
+
+
 @dataclass
 class Division:
     """One 师: a ``DeckDivision`` and the battalions (营) that belong to it."""
@@ -372,8 +388,12 @@ class Session:
             self.dirty = True
             # The Battalion tree is a snapshot; every edit rewrites the very
             # fields it copied, so it must be rebuilt or the UI would keep
-            # showing pre-edit counts next to a post-edit slot pool.
-            self.deck.invalidate()
+            # showing pre-edit counts next to a post-edit slot pool.  Which
+            # trees is worth narrowing: an edit rewrites one deck, and
+            # rebuilding all 2266 costs about a second (see DeckFile.invalidate).
+            # The edit layer already invalidates the deck it touched; this is
+            # the safety net for a result that cannot name one.
+            self.deck.invalidate(_touched_decks(res))
             self._catalogue_stale = True
             self.note(f"{what}: {res.summary()}")
 

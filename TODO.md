@@ -893,14 +893,41 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
         "窗口来自旧快照 + 池子来自活对象"的错配
       —— 测试 `test_gui` 第 7b 节 5 项：tooltip == 活窗口、排/连标签 == 用活营重算的值、
         缓存列表的 Σ == 活 Σ。**修前 4 红，修后全绿**
-- [ ] **T12.3** ⚠️ **顺带测到的性能问题（未修，独立优化）**
-      —— 每次编辑后 `deck.battalions()` 要**全量重建 2266 个营 ≈ 1008 ms**
-        （单营 `_build` 6.3 ms；`invalidate()` 本身只要 26 ms；编辑本身 25 ms）
-      —— 所以改完件数会有**约 1 秒卡顿**（目前由 `_deck_of` 触发）。这与"显示错乱"
-        是两件事，但用户容易一起感知成"滞后"
-      —— 建议做法：`Battalion` 按 `deck_object_id` 缓存，`invalidate(deck_ids)`
-        只失效被改的那几个（`relay` 知道是哪个营；`ScopedReplace` 有 `_decks_touched`）。
-        风险在"哪条路径忘了传 id" → 需保留"无 id 就全失效"的兜底
+- [x] **T12.3** ✅ **编辑后的 1 秒卡顿已修**（按营缓存 + 定向失效）
+      —— 修前：`deck.battalions()` 每次编辑后**全量重建 2266 个营 ≈ 1008 ms**
+        （单营 `_build` 6.3 ms；`invalidate()` 26 ms；编辑本身 25 ms）
+      —— 修法：`DeckFile` 改成**按 `deck_object_id` 缓存 `Battalion`** +
+        `invalidate(deck_ids=None)` 三档语义：
+        `None` = 全失效（**默认，永远正确的兜底**）；
+        `{id}` = 只失效这个营；`()` = 只重索引对象表、不动树（追加 pack 用）
+      —— 失效点收敛到**唯一写入口** `Retiler.relay`（`set_count` / 换装备 / 增删条目 /
+        批量替换全部经由它），它自己 `invalidate({deck_object_id})`
+      —— 结果类 `RetileResult` / `SwapResult` / `EntryResult` 带上 `deck_object_id`，
+        `Session.note_change` 走 `_touched_decks(res)`；`ScopedReplace` 用 `set(per_deck)`；
+        **认不出营就退回全失效** —— 宁可慢，不可错
+      —— ★ 实测：`battalions()` **1008 ms → 1.4 ms**；改一个营后
+        **只有那一个营是新对象，其余 2207 个仍是同一批对象**（身份比对）
+      —— 测试 `test_quantity` 第 6 节 5 项：只重建被改的营 / 其余同一对象 /
+        该营 Σ==池 / **全量 `invalidate()` 仍会忘掉所有树**（兜底不许失效）
+      —— ⚠️ 改的过程中犯过一次：把模块级 helper 插到了 `@dataclass` 和
+        `class Division` 之间，`import` 照过、`Division()` 才炸
+        —— 与「易错点」里"新增同名方法"同类：**位置错误的插入不会被 import 发现**
+- [x] **T12.4** ✅ **发布 v0.5**（2026-10-18）
+      —— 产物 `dist/Warno Ndfbin Decks Editor v0.5.exe`
+        **37,701,708 B** ｜ md5 `35bd597d4c87eba57b0e25f36d7122d9`
+      —— 内容 = 深浅色跟随系统 + 编辑后显示滞后修正 + 1 秒卡顿修正
+      —— 流水线照旧：`build_exe.py 0.5` → `verify_exe.py 0.5` → `cp` 进 `dist/`；
+        两侧 md5 一致；v0.4 归档到 `dist_0.4/`（同字节未删）
+      —— ★ 包内新增 `ndfbin_decks/app/theme` 载荷断言（缺了会启动即崩）；
+        另从 EXE 里挖出 `AppsUseLightTheme` / `_refresh_scope` / `_touched_decks`，
+        **证明新代码真进了包**而不是只改了源码
+      —— 热启动 **1.6 s**（测两遍，与 v0.4 相同 → 自绘调色板无可测开销）；
+        新二进制冷启动 4.1 s（Defender）
+      —— 双环境（PySide6 6.12 / 6.3.2）**15/15 全 PASS**
+      —— ⚠️ 过程中自己引入过一个性能回归：`relay` 里的 `invalidate({id})` 最初
+        也重建 6 万对象的索引（26 ms/次），把 `test_quantity` 的 7 万次循环从
+        几分钟拖成几小时。**修法：把 `reindex()` 从 `invalidate()` 里拆出去** ——
+        编辑不改对象表，就不该重建索引
 
 ---
 
