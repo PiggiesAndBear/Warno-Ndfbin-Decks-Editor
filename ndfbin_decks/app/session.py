@@ -170,6 +170,16 @@ class Session:
     def battalion(self, needle: str):
         return self.deck.find(needle)
 
+    def battalion_by_id(self, deck_object_id: int):
+        """The live Battalion for one deck id, or ``None``.
+
+        Callers that keep a Battalion across an edit hold a *snapshot*: every
+        edit rebuilds them.  Going back through the id is the only way to be
+        sure a view is looking at the current graph.
+        """
+        return next((b for b in self.battalions()
+                     if b.deck_object_id == deck_object_id), None)
+
     def divisions(self) -> list[Division]:
         """AG battalions grouped into divisions (师), biggest first.
 

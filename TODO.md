@@ -856,6 +856,54 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
 
 ---
 
+## 阶段 12 · 界面修复：主题跟随系统 + 编辑后显示滞后（2026-10-18）
+
+> 用户报两条：① 窗口配色要跟随系统深浅色；② 装备加减数量能生效，但
+> 「组织 / 装备条目」的显示滞后且错乱。
+
+- [x] **T12.1** ✅ **深浅色跟随系统**（`ndfbin_decks/app/theme.py`）
+      —— ★★ **根因不是"没写主题"，是打包用的 Qt 版本根本做不到**：
+        发布的 EXE 冻结在 **PySide6 6.3.2**，Windows 上选的是 `windowsvista` 样式，
+        **它只认浅色**；`QStyleHints.colorScheme()` 要到 **Qt 6.5** 才有。
+        实测同一台机器：Qt 6.12 的 `windows11` 默认就是 `#1e1e1e`（已跟随），
+        6.3.2 的 `windowsvista` 恒为 `#efefef` —— 用 EXE 的人看到浅色，开发机看到深色
+      —— 做法：**统一走 Fusion + 自绘调色板**（`windowsvista` 不逐角色遵守 `QPalette`，
+        自绘深色在它上面是花的）。代价：不再是原生 Windows 外观；
+        换来 dev 与 EXE 一致、深浅两套都定型
+      —— 检测双路径：Qt `colorScheme()`（≥6.5）→ Windows 注册表
+        `AppsUseLightTheme`（`winreg`，非 `reg.exe` —— 后者被安全策略拦）
+      —— 实时切换：≥6.5 接 `colorSchemeChanged`；6.3.2 **无信号** → 2 s 轮询注册表
+        （一次整数读取，比一次重绘便宜）
+      —— ★ 顺带清掉两处**写死颜色**：表格里「继承」的灰 `#787878`、选中排的浅绿
+        `(200,240,200)` —— 后者在深色下是大块亮绿。都改成 palette 相对
+      —— 测试 `test_gui` 第 14 节 9 项：检测值 == 注册表、两套配色的窗口色与
+        文字反差、运行时切换后表格仍在且有行
+- [x] **T12.2** ✅ **组织/装备条目显示滞后错乱**
+      —— ★★ **根因：`self._divisions` / `self._countries` 只在"切换 mod"时建一次**
+        （`_on_mod_changed`）。它们不只是标签 —— 每个 `Division` 里装着一批
+        **`Battalion` 快照**，而 `DeckFile.invalidate()` 每次编辑都会换掉这些对象。
+        于是树用旧快照重建（标签、tooltip 全是改前的），表格却按 id 取到活对象 →
+        **同一屏上两个视图来自两个时刻**
+      —— 实测症状（修前）：排 tooltip `[0..1]x2` vs 活 `[0..3]x4`；
+        连标签 `Howz_M101_105mm_RFA ×8` vs 活 `×8 · Iltis_RFA ×1 · M113_GreenArcher_RFA ×1`
+        —— **新加进去的两种装备在树里根本没出现**，这正是"错乱"
+      —— 修法：新增 `MainWindow._refresh_scope()`，`_reload()` 与 `_on_mod_changed()`
+        共用；★ 另加一道防御 —— `EntryTable.fill()` **按 `deck_object_id` 重新取活的营**
+        （`Session.battalion_by_id`），任何调用方递进旧快照都不会再造成
+        "窗口来自旧快照 + 池子来自活对象"的错配
+      —— 测试 `test_gui` 第 7b 节 5 项：tooltip == 活窗口、排/连标签 == 用活营重算的值、
+        缓存列表的 Σ == 活 Σ。**修前 4 红，修后全绿**
+- [ ] **T12.3** ⚠️ **顺带测到的性能问题（未修，独立优化）**
+      —— 每次编辑后 `deck.battalions()` 要**全量重建 2266 个营 ≈ 1008 ms**
+        （单营 `_build` 6.3 ms；`invalidate()` 本身只要 26 ms；编辑本身 25 ms）
+      —— 所以改完件数会有**约 1 秒卡顿**（目前由 `_deck_of` 触发）。这与"显示错乱"
+        是两件事，但用户容易一起感知成"滞后"
+      —— 建议做法：`Battalion` 按 `deck_object_id` 缓存，`invalidate(deck_ids)`
+        只失效被改的那几个（`relay` 知道是哪个营；`ScopedReplace` 有 `_decks_touched`）。
+        风险在"哪条路径忘了传 id" → 需保留"无 id 就全失效"的兜底
+
+---
+
 ## 易错点（都是本项目实际踩过的）
 
 | 坑                                        | 后果                                                                                      | 对应任务                                    |
@@ -880,6 +928,7 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
 | **以为 AG 牌组的 `Number` 也很多样**              | 实测 **恒为 1**（557,561 槽位零例外）；21 种取值全在 PvP 侧                                               | T4.1 ✅已普查                               |
 | ★ **把 `trans_ref` 的 index 当成 `TRAN` 下标** | 写入后 `Unresolved CNDF import index`。该 index 实为 **`IMPR` 路径树的节点 id**（节点 0 = `$` 根）        | T4.1 ✅已修正                               |
 | ★ **先追加对象再重建路径树**                        | 顺序反了。`append_graph_objects` 会即时校验 ⇒ 必失败。必须**先长树→回填 id→再追加**                             | T4.1 ✅已修正                               |
+| ★ **把 `Battalion` 缓存跨过一次编辑**            | 它是**快照**：`invalidate()` 之后活对象换了一批，缓存还指着旧的 → 两个视图来自两个时刻（树旧、表新），看着像"错乱" | **T12.2** ✅按 id 重取 / 编辑后重建作用域缓存 |
 
 ---
 

@@ -46,7 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSortFilterProxyModel
-from PySide6.QtGui import (QBrush, QColor, QIcon, QStandardItem,
+from PySide6.QtGui import (QBrush, QColor, QIcon, QPalette, QStandardItem,
                            QStandardItemModel)
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QCompleter, QDialog,
@@ -58,6 +58,7 @@ from PySide6.QtWidgets import (
 from .. import APP_NAME, APP_TAGLINE, __version__
 from .. import paths
 from ..io import divisions, modlocator
+from . import theme
 from .replace_dialog import ReplaceDialog
 from .session import Session, open_mod
 from .swap_dialog import SwapDialog
@@ -354,6 +355,12 @@ class EntryTable(QTableWidget):
 
     def fill(self, session: Session, deck) -> None:
         """List every entry of a battalion in ``cg -> sg -> entry`` order."""
+        # Resolve by id rather than trusting the caller's object.  The windows
+        # come from the Battalion while the pool comes from the live graph; if
+        # the caller holds a pre-edit snapshot the two disagree and every row
+        # after the change lists the *previous* equipment — which reads as rows
+        # being scrambled, not as a stale copy.
+        deck = session.battalion_by_id(deck.deck_object_id) or deck
         pool = session.retiler.pool(deck.deck_object_id)
         rows = []
         for ci, company in enumerate(deck.companies):
@@ -388,7 +395,10 @@ class EntryTable(QTableWidget):
                 if col == 0:
                     item.setData(Qt.UserRole, (ci, si, ei))
                 if col == 5 and xp == tr("继承"):
-                    item.setForeground(QBrush(QColor(120, 120, 120)))
+                    # Palette-relative: a fixed grey disappears on one theme
+                    # and shouts on the other.
+                    item.setForeground(QBrush(self.palette().color(
+                        QPalette.ColorRole.PlaceholderText)))
                 if col == 7:
                     item.setToolTip(tr("占 {count} 个槽位，全部必须是同一装备", count=count))
                 self.setItem(row, col, item)
@@ -417,7 +427,11 @@ class EntryTable(QTableWidget):
         """Mark the entries of one platoon — or of a whole company when ``si``
         is ``None``, which is what selecting a company node should show."""
         self._lit = None if ci is None else (ci, si)
-        brush = QBrush(QColor(200, 240, 200))
+        # Tinted from the palette's highlight rather than a fixed pale green,
+        # which is unreadable once the window goes dark.
+        tint = QColor(self.palette().color(QPalette.ColorRole.Highlight))
+        tint.setAlpha(70)
+        brush = QBrush(tint)
         for row in range(self.rowCount()):
             item = self.item(row, 0)
             if item is None:
@@ -477,6 +491,19 @@ class MainWindow(QMainWindow):
         if self.session is not None:
             self._fill_tree()
             self._refresh_mods()
+
+    def on_theme_changed(self, mode: str) -> None:
+        """Repaint after the desktop switched light/dark.
+
+        ``theme.apply`` hands Qt the new palette and every widget that has not
+        overridden one follows.  What does *not* follow is anything painted
+        into an item at fill time — the platoon highlight tint is derived from
+        the palette when the rows are built — so the table is rebuilt from the
+        current selection.
+        """
+        theme.apply(QApplication.instance(), mode)
+        if self.session is not None and self._current() is not None:
+            self._on_tree_select()
 
     def on_language(self, index: int) -> None:
         code = self.lang_box.itemData(index)
@@ -778,9 +805,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, tr("打开失败"), f"{exc}")
             traceback.print_exc()
             return
-        self._divisions = self.session.divisions()
-        self._countries = self.session.countries()
-        self._country_of = {c.code: c for c in self._countries}
+        self._refresh_scope()
         total = len(self.session.battalions())
         # ``set_options`` notifies nobody, so the refresh below is explicit and
         # happens once, on a whole list — the country box used to need its own
@@ -852,6 +877,23 @@ class MainWindow(QMainWindow):
             select=1 if len(scope) > 1 else 0)
 
     # -- tree -------------------------------------------------------------
+
+    def _refresh_scope(self) -> None:
+        """Rebuild the 师 / 国 lists after the graph changed.
+
+        They are not just labels: each :class:`Division` carries the
+        ``Battalion`` objects the tree is built from.  ``DeckFile.invalidate``
+        replaces those objects after an edit, so a list captured at open time
+        keeps pointing at the *pre-edit* decks — the tree then shows the old
+        counts and compositions while the table, which resolves its deck live,
+        shows the new ones.  One user read exactly that as "the entries under an
+        organisation are scrambled".
+        """
+        if self.session is None:
+            return
+        self._divisions = self.session.divisions()
+        self._countries = self.session.countries()
+        self._country_of = {c.code: c for c in self._countries}
 
     def _matching_battalions(self):
         """The battalions the filter chain currently selects.
@@ -1330,6 +1372,7 @@ class MainWindow(QMainWindow):
             return
         role = self._current()
         addr = self.table.selected_entry()
+        self._refresh_scope()
         self._fill_tree()
         if role is not None and role.deck_id is not None:
             node = self._node_for(role.deck_id, role.ci, role.si)
@@ -1381,8 +1424,14 @@ def main() -> int:
     code = settings.saved_language()
     i18n.set_language(code)
     qt_builtin.install(app, code)
+    # Before any widget exists: the palette applies to whatever is built after
+    # it, and to already-built widgets it would have to be pushed again.
+    theme.apply(app)
     win = MainWindow()
     win.show()
+    # Live switching. Qt 6.5+ signals it; the frozen 6.3.2 build polls the
+    # registry, so a user who flips the system theme does not have to restart.
+    theme.follow(app, win.on_theme_changed)
     return app.exec()
 
 

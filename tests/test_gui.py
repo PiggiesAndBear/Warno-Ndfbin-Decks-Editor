@@ -648,6 +648,37 @@ def main() -> int:
     check("session marked dirty", s.dirty)
 
     print()
+    print("=== 7b. the tree tracks the edit, not the snapshot it was built from ===")
+    # Reported: the count change worked and the table followed, but the
+    # organisation tree kept showing the old numbers and compositions.  The
+    # tree is built from ``_divisions``, which was filled once when the mod was
+    # opened; after an edit it still pointed at the pre-edit Battalion objects,
+    # so every 连/排 label and tooltip was a snapshot of the old deck.
+    live = next(b for b in s.battalions() if b.deck_object_id == did)
+    node = win._node_for(did, ci, si)
+    check("the platoon node survived the reload", node is not None, str(node))
+    if node is not None:
+        want_tip = " ".join(str(w) for w in live.companies[ci].platoons[si].windows)
+        check("its tooltip lists the live windows",
+              node.toolTip(0) == want_tip,
+              f"tree={node.toolTip(0)!r} live={want_tip!r}")
+        want_pl = win._pl_label(live, ci, si, live.companies[ci].platoons[si])
+        check("its label is rebuilt from the live deck",
+              node.text(0) == want_pl, f"{node.text(0)!r} vs {want_pl!r}")
+        co_node = win._node_for(did, ci)
+        want_co = win._co_label(live, ci, live.companies[ci])
+        check("the company label too",
+              co_node is not None and co_node.text(0) == want_co,
+              f"{(co_node.text(0) if co_node else None)!r} vs {want_co!r}")
+    # The division list the tree reads from must be the live one as well — a
+    # stale `_divisions` is the root cause, the labels are only the symptom.
+    cached = next((b for d in win._divisions for b in d.battalions
+                   if b.deck_object_id == did), None)
+    check("the cached division list was refreshed after the edit",
+          cached is not None and cached.window_sum == live.window_sum,
+          f"cached Σ={cached.window_sum if cached else None} live Σ={live.window_sum}")
+
+    print()
     print("=== 8. insert / remove paths ===")
 
     # Every edit rebuilds the tree, so the node must be re-located each time
@@ -1289,6 +1320,50 @@ def main() -> int:
     check("set_count on a division node is blocked",
           any("请先选中" in m for _, m in shown),
           str(shown[-1]) if shown else "no dialog")
+
+    print()
+    print("=== 14. the window follows the desktop's light/dark setting ===")
+    from ndfbin_decks.app import theme
+
+    def window_is_dark(pal) -> bool:
+        return pal.color(pal.ColorRole.Window).value() < 100
+
+    mode = theme.system_mode()
+    check("the desktop scheme is detected", mode in ("light", "dark"), mode)
+    check("detection agrees with the Windows registry",
+          mode == (theme._from_windows_registry() or mode),
+          f"{mode} vs {theme._from_windows_registry()}")
+
+    check("applying dark returns dark", theme.apply(app, "dark") == "dark")
+    check("the window colour actually went dark",
+          window_is_dark(app.palette()),
+          app.palette().color(app.palette().ColorRole.Window).name())
+    dark_win = app.palette().color(app.palette().ColorRole.Window)
+    dark_txt = app.palette().color(app.palette().ColorRole.WindowText)
+    check("text on a dark window is light, not dark-on-dark",
+          dark_txt.value() - dark_win.value() > 100,
+          f"{dark_txt.name()} on {dark_win.name()}")
+
+    check("applying light returns light", theme.apply(app, "light") == "light")
+    check("the window colour went back",
+          app.palette().color(app.palette().ColorRole.Window).value() > 180,
+          app.palette().color(app.palette().ColorRole.Window).name())
+
+    # The live switch has to repaint what was painted into items at fill time.
+    # Section 13 left the selection cleared, so pick a platoon again first.
+    root = win.tree.topLevelItem(0)
+    if root is not None and root.childCount() and root.child(0).childCount():
+        win.tree.setCurrentItem(root.child(0).child(0))
+        app.processEvents()
+    rows_before = win.table.rowCount()
+    win.on_theme_changed("dark")
+    app.processEvents()
+    check("switching theme keeps the table populated",
+          win.table.rowCount() == rows_before and rows_before > 0,
+          f"{rows_before} -> {win.table.rowCount()}")
+    check("and leaves the window dark", window_is_dark(win.palette()),
+          win.palette().color(win.palette().ColorRole.Window).name())
+    theme.apply(app, mode)          # put the app back where it started
 
     print()
     if FAILURES:
