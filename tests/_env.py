@@ -55,6 +55,10 @@ TEST = "Test"
 BERLIN = "WarnoAGF_berlin_1989"
 NORTHERN_THUNDER = "3816950018"
 
+#: 装备速查表的样本：同时带 ``GFX/Unit`` 与 ``GFX/Deck``，而且作者加了上千件
+#: 新装备 —— 只有这种 mod 才能同时验证「装备 × pack」两边和「新增」判定。
+SAMPLE = "3388575848"
+
 
 def skip(why: str) -> None:
     """Report that this test cannot run here, and stop without failing."""

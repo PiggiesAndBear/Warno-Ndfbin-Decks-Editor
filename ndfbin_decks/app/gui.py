@@ -41,13 +41,14 @@ what is inside it, and that is always answerable, so the composition
 from __future__ import annotations
 
 import sys
+import time
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QSortFilterProxyModel
-from PySide6.QtGui import (QBrush, QColor, QIcon, QPalette, QStandardItem,
-                           QStandardItemModel)
+from PySide6.QtCore import Qt, QSortFilterProxyModel, QUrl
+from PySide6.QtGui import (QBrush, QColor, QDesktopServices, QIcon, QPalette,
+                           QStandardItem, QStandardItemModel)
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QCompleter, QDialog,
     QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
@@ -57,7 +58,7 @@ from PySide6.QtWidgets import (
 
 from .. import APP_NAME, APP_TAGLINE, __version__
 from .. import paths
-from ..io import divisions, modlocator
+from ..io import divisions, equip_lookup, modlocator
 from . import theme
 from .replace_dialog import ReplaceDialog
 from .session import Session, open_mod
@@ -649,7 +650,8 @@ class MainWindow(QMainWindow):
         # re-apply whatever the build-time call returned.  That also keeps every
         # key visible to ``tools/i18n_sync.py``, which reads source, not runtime.
         for slot in (self.on_set_count, self.on_swap, self.on_insert,
-                     self.on_remove, self.on_replace, self.on_save):
+                     self.on_remove, self.on_replace, self.on_export_lookup,
+                     self.on_save):
             btn = QPushButton()
             btn.clicked.connect(slot)
             row.addWidget(btn)
@@ -673,6 +675,11 @@ class MainWindow(QMainWindow):
             self.on_insert: (tr("插入条目"), tr("在选中排里加一条装备")),
             self.on_remove: (tr("删除条目"), tr("删掉选中排里的一条装备")),
             self.on_replace: (tr("批量替换"), tr("按 师/营/连/排 层级批量换装备")),
+            self.on_export_lookup: (
+                tr("导出装备清单"),
+                tr("把整个 Mod 的装备与 AG pack 导成一张单文件 HTML：\n"
+                   "哪些装备有 pack、哪些没有、相对原版新增了哪些。\n"
+                   "只读 —— 不碰 Mod 里的任何文件。")),
             self.on_save: (tr("保存"), tr("写回 Deck.ndfbin（先备份）")),
         }
         for btn, slot in self._action_buttons:
@@ -1369,6 +1376,87 @@ class MainWindow(QMainWindow):
                 return co
             return co.child(si) if co.childCount() > si else None
         return None
+
+    # ---- 导出装备清单 ----
+
+    def on_export_lookup(self) -> None:
+        """把当前 mod 的装备 / pack 整表导成一张单文件 HTML。
+
+        它答的是「这个 mod 里有什么、哪些新装备还进不了将军模式」—— 通用视图
+        一次只能看一个对象，翻不出这个答案。只读：读 mod 的 ``Gen/NDF/GFX/``
+        与 ``base.zip``，不碰任何 mod 文件，也不影响当前未保存的改动。
+        """
+        mod = getattr(self.session, "mod", None) if self.session is not None else None
+        if mod is None:
+            QMessageBox.information(
+                self, tr("先选一个 Mod"),
+                tr("导出清单要读这个 Mod 的 Unit.ndfbin 和 base.zip，"
+                   "先在上面的 Mod 下拉框里选一个。"))
+            return
+        # 只有「装备速查」这个词进词表；文件名其余部分是 mod 名与日期，
+        # 让翻译者去拼 `{prefix}-{name}-{date}` 这种模板没有意义。
+        default = Path.home() / (
+            f"{tr('装备速查')}-{mod.name}-{time.strftime('%Y%m%d')}.html")
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("导出装备清单"), str(default), tr("网页 (*.html)"))
+        if not path:
+            return
+        out = Path(path)
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            lookup = equip_lookup.build_lookup(mod)
+            out.write_text(equip_lookup.render_html(lookup), encoding="utf-8")
+        except equip_lookup.LookupUnavailable as exc:
+            QMessageBox.warning(self, tr("导不出这张表"), str(exc))
+            return
+        except OSError as exc:
+            QMessageBox.warning(self, tr("写不了文件"), f"{out}\n\n{exc}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self._report_lookup(lookup, out)
+
+    def _report_lookup(self, lookup, out: Path) -> None:
+        """导出之后必须交底：读了哪些文件、有多少条对不上。
+
+        没有这一步，用户拿到的就是一张不知来历的表 —— 而这张表最容易出的
+        问题恰恰是「读错了文件」和「几条引用没连上」，它们都不会让页面崩。
+        """
+        counts = lookup.counts()
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("装备清单已导出"))
+        box.setIcon(QMessageBox.Information)
+        size = out.stat().st_size / 1048576 if out.is_file() else 0.0
+        box.setText(tr(
+            "<b>{file}</b>　{size:.2f} MB　（{secs:.1f} 秒）<br><br>"
+            "装备 <b>{total}</b>（★ 新增 {new}） · 有 pack <b>{have}</b>"
+            " / 仅载具 {veh} / 无 pack <b>{none}</b><br>"
+            "pack {packs}（被引用 {used}、孤儿 {orphan}） · AG 牌组 {decks}",
+            file=out.name, size=size, secs=lookup.elapsed,
+            total=counts["total"], new=counts["new"], have=counts["have"],
+            veh=counts["veh"], none=counts["none"], packs=counts["packs"],
+            used=counts["packs_used"], orphan=counts["orphan"],
+            decks=counts["decks"]))
+        detail = [tr("数据来源")] + [f"  · {s}" for s in lookup.sources]
+        if lookup.notes:
+            detail += ["", tr("口径与提醒")] + [f"  · {n}" for n in lookup.notes]
+        if lookup.skipped:
+            detail += ["", tr("未计入装备表的对象 {n} 个", n=len(lookup.skipped)),
+                       "  " + "、".join(lookup.skipped[:12])
+                       + ("…" if len(lookup.skipped) > 12 else "")]
+        if lookup.dangling:
+            detail += ["", tr("悬空引用")]
+            detail += [f"  · {d}" for d in sorted(set(lookup.dangling))]
+        box.setDetailedText("\n".join(detail))
+        box.setInformativeText(
+            tr("「详细信息」里有读了哪些文件、有多少条对不上。"))
+        open_btn = box.addButton(tr("打开"), QMessageBox.AcceptRole)
+        box.addButton(tr("关闭"), QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_btn:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(out)))
 
     def _reload(self) -> None:
         """Refresh the tree and table from the mutated graph, keeping the place.

@@ -230,6 +230,9 @@ def main() -> int:
         ("ndfbin_decks/app/swap_dialog", "the equipment picker"),
         ("ndfbin_decks/io/divisions", "the 师/国家 parser"),
         ("ndfbin_decks/io/unit_universe", "the unit universe"),
+        # 只从动作栏那个「导出装备清单」按钮进得去：少了它的构建照样能启动、
+        # 照样能改牌组，只在有人想导出时才会炸。
+        ("ndfbin_decks/io/equip_lookup", "the equipment lookup exporter"),
         # Shipped as data, so the pattern has to name the file — see the
         # ``--add-data`` above.  Missing, the app still runs, in Chinese.
         ("ndfbin_decks/i18n/en.json", "the English interface table"),

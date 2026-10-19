@@ -180,6 +180,16 @@ class Session:
 
     # -- read-only views --------------------------------------------------
 
+    @property
+    def mod(self):
+        """这个文件所属的 mod（:class:`~ndfbin_decks.io.modlocator.ModPaths`）。
+
+        导出装备清单要它 —— 清单读的是 ``Unit.ndfbin`` / ``base.zip``，那些都在
+        mod 这一层，不在 ``Deck.ndfbin`` 里。松散的单个文件（用户直接指了一个
+        deck 路径，没经过 mod 列表）会是 ``None``，调用方要自己处理。
+        """
+        return self._mod
+
     def battalions(self):
         return self.deck.battalions()
 

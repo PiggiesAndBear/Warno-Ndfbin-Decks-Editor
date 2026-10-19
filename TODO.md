@@ -1017,6 +1017,66 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
 
 ---
 
+## 阶段 15 · 导出装备清单（2026-10-19 立项并完成）
+
+> 用户反馈：使用者**不清楚 Mod 新单位的整体情况**（哪些新装备还没有 pack、
+> 为什么装备选择器里选不到）。树和表一次只看一个营，翻不出这个答案。
+> 产物：`ndfbin_decks/io/equip_lookup.py`（内核 + HTML + CLI）、动作栏按钮
+> `导出装备清单`、`tests/test_equip_lookup.py`（50 项）。
+
+- [x] **T15.1** ✅ **数据口径：装备 = 有 UI 模块的实体**（样本 `A World in Flames`）
+      —— ★★ **不是「前缀是 Unit_/Building_」**：4622 个 `TEntityDescriptor` 里
+        **936 个是 Mimetic 影子单位**（只有 `TMimeticTransform/Steering/FXManager` +
+        `TLinkToOwner`），**没有 `TUnitUIModuleDescriptor`** —— 无名称、无角色、
+        无价格、**0 个 pack 指向**，游戏里选不到
+      —— 正确口径 **3686** = 有 pack **2247** + 仅载具 **317** + 无 pack **1122**
+        （交叉表自洽，测试钉住）
+      —— ★ **775 个新装备里 601 个没有任何 pack** —— 这就是「新单位选不到」的实质
+- [x] **T15.2** ✅ **三处 `.ndf` → `.ndfbin` 落差，逐项有解**
+      —— **装备名**：编译产物没有对象名，用 `"Descriptor_" + ClassNameForDebug`
+        重建（100%）；`NameToken` 是 `loc_hash`，只能靠 mod 自带 `.dic`
+        解出 **643/3686（17%）** → 词条名作附加列，作者写的调试名作主名
+      —— **两个枚举是 int32**：`base.zip` 的
+        `GameData/Gameplay/Constantes/Enumerations/{TypeStrategicDetailedCount,Coalition}.ndf`
+        **明写整数**（`Infantry is 12` / `NATO is 0`）→ 优先读它，
+        内置表只作回落，**测试断言两者 37 项逐项相等**
+      —— ★ **编译器省略默认值**：`Coalition` 缺失 = 0 = NATO。样本里 2 个
+        SOV 单位确实漏了这行 → 表里按字段显示成 NATO，**并在提醒里点名**
+      —— ★★ **pack 没有名字**：`TDeckPackDescriptor` 只有 `UnitDescriptor` /
+        `TransporterDescriptor` / `ExperienceLevel` / `Number`，无 export。
+        原版那批按（装备+载具+XP）签名从 `StrategicPacks.ndf` 反查回原名
+        **3538/5415**，其余给合成标签 + `object_id`
+- [x] **T15.3** ✅ **缺文件分两种处理**
+      —— **缺 `GFX/Unit` → 拒绝导出**（这个 mod 没改装备；一张全来自原版的表
+        会被误读成「我的 mod」）—— 柏林 mod 实测走这条路
+      —— **缺 `GFX/Deck` → 退到 `base.zip`**（pack 只存在于 Deck 里，没有它
+        mod 不可能有自己的 pack，用原版是**语义正确**）。解析
+        `StrategicPacks.ndf`（2685 个 / 0.01 s）与 `StrategicDecks.ndf`
+        （12.5 MB / 2208 个 AG 牌组 / 0.22 s），页面顶部写明来源
+- [x] **T15.4** ✅ **入口**
+      —— GUI：动作栏 `导出装备清单`（排在「保存」之前 —— 它不改文件），
+        导的是**当前选中的 mod**，不需要再选一次
+      —— CLI：`python -m ndfbin_decks.io.equip_lookup --mod <名称|工坊id> --out x.html`
+      —— 导出后弹窗交底：读了几份文件、多少条悬空引用、多少对象未计入
+- [x] **T15.5** ✅ **测试与文档**
+      —— `tests/test_equip_lookup.py` **50 项**：口径 / 交叉表自洽 / JOIN /
+        枚举表与 base.zip 逐项一致 / 缺 Unit 报错 / 缺 Deck 兜底 / HTML 可解析且
+        无外链 / **只读（两个 ndfbin 的 size+mtime 未变）** / CLI
+      —— 页面用 QtWebEngine 实拍逐节看过；`node` 里跑页面脚本数出行数
+      —— 手册新增 **4.5 导出装备清单**（第 4 节从「四个操作」改成「五个」）
+      —— `en.json` **315/315（100%）**，0 待译 0 孤儿
+- [x] **T15.6** ⚠️ **迁移经过（记一笔，免得将来有人去错仓库找代码）**
+      —— 这个功能最初被实现进了 **Warno Ndfbin Editor**（因为它那份沟通稿里
+        写的是 `ndfbin_decks/ndfedit/equip_lookup.py`），用户随后更正：
+        **要的是本项目**。那边已 `git reset --hard` 回滚，代码迁到这里
+      —— 迁移时的改动只有三处：包路径（`ndfedit/` → `io/`）、导入层级、
+        提示语改走 `tr()`（本项目界面是双语的；**页面正文仍是中文**，
+        与 `doc/使用教程.md` 同类，不跟界面语言切）
+- [ ] **T15.7** 💡 未做：页面正文的英文版。如果哪天有英文用户，把 HTML 模板里的
+      标题/表头也接进 `tr()` 即可 —— 目前判断不值得（使用者全是中文）
+
+---
+
 ## 易错点（都是本项目实际踩过的）
 
 | 坑                                        | 后果                                                                                      | 对应任务                                    |
