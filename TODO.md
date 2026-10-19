@@ -1090,6 +1090,28 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
       —— 双环境（PySide6 6.12 / 6.3.2）**16/16 全 PASS**
       —— ⚠️ 发版前把 `.venv/Scripts/python.exe` 误写成 `C:/Users/123/.venv/...`
         一次（exit 127）—— 脚本没问题，是命令行手误；重跑即过
+- [x] **T15.9** ✅ **修正：装备判据选错，丢掉整批单位**（2026-10-19，用户报）
+      —— 现象：`Honor Or Death`（工坊 3395350736）导出的装备不全，缺了大量 mod
+        新增装备；而编辑器改编制时**部队下拉框认得出**它们
+      —— ★★ **根因：我拿 `ClassNameForDebug` 的前缀当判据**（`Unit_`/`Building_`），
+        而那是**作者自己起的显示名**。该 mod 3701 个可选单位里 **751 个**的调试名是
+        `2S22_BOGDANA_UKR`、`AAteam_BARKAN_ISR` 这类**不带前缀**的，整批被筛掉
+      —— 正确判据：**该实体被导出成 `$/GFX/Unit/Descriptor_Unit_*`**。
+        它同时是 **pack 引用单位时用的字符串**，所以「清单里有」与「下拉框认得出」
+        天然是同一批 —— 直接复用 `unit_universe.UNIT_PATH_RE`，不另写一份
+      —— 交叉验证（两个 mod 上完全一致）：
+        `Honor Or Death` 导出 3701 / 有 UI 3701 / 交集 3701；
+        `A World in Flames` 3686 / 3686 / 3686
+      —— 修正前后：`Honor Or Death` 装备 **2950 → 3701**、
+        **悬空引用 342 → 0**；`A World in Flames` 3686 不变，但
+        **悬空 1 → 0**、有 pack **2247 → 2248**
+      —— ★ 那条「悬空 1」其实是**我判断错误**：该单位导出成
+        `Descriptor_Unit_WF_VDV_HMG_RUS`、调试名却写成 `Unit_VWF_VDV_HMG_RUS`，
+        v0.7 的报告里把它算成「mod 笔误」，实际是**拿显示名当身份**造成的假引用
+      —— `skipped` 的语义随之改成「没有 unit 导出」（AWF 940 = 936 Mimetic +
+        4 个 `*_District`），文案与 `en.json` 同步（315/315）
+      —— 测试 **58 项**，新增 §2b：该 mod 的 3701 数、零悬空、交叉表、
+        无前缀单位在表里、以及**「清单集合 == 下拉框集合」的集合相等断言**
 
 ---
 

@@ -54,7 +54,7 @@ from pathlib import Path
 
 from ..core import cndf_codec
 from ..i18n import tr
-from . import localisation, modlocator
+from . import localisation, modlocator, unit_universe
 
 #: ``[Config]`` 里这两个槽位决定「哪些文件是这个 mod 自己的」。
 SLOT_UNIT = "GFX/Unit"
@@ -119,13 +119,27 @@ PACT_COUNTRIES = frozenset({"SOV", "DDR", "POL", "TCH"})
 NATO_COUNTRIES = frozenset({"US", "FR", "UK", "RFA", "BEL", "NL", "ESP",
                             "DK", "CAN", "LUX"})
 
-#: 装备的判据：``ClassNameForDebug`` 以这两个前缀开头。
-#: 别的东西也会是 ``TEntityDescriptor``（District 贴图区、Mimetic 影子单位），
-#: 判据写宽了会把它们当装备混进来。
-EQUIP_PREFIXES = ("Unit_", "Building_")
+#: 装备的判据：**这个实体被导出成 ``$/GFX/Unit/Descriptor_Unit_*``**。
+#:
+#: ★★ 不能用 ``ClassNameForDebug`` 的前缀 —— 那是**作者自己起的显示名**，
+#: 不带 ``Unit_`` 的完全正常。实测 ``Honor Or Death``：3701 个可选单位里
+#: 有 751 个的调试名是 ``2S22_BOGDANA_UKR``、``AAteam_BARKAN_ISR`` 这种，
+#: 按前缀筛会**整批丢掉**，而 pack 与编辑器的部队下拉框都按导出名认它们。
+#:
+#: 导出路径也是 pack 引用单位时用的那一个字符串，所以拿它当主键，
+#: 「清单里有」与「编辑器认得出」天然一致。规则与
+#: :data:`ndfbin_decks.io.unit_universe.UNIT_PATH_RE` 是同一条 —— 复用，
+#: 免得两处各写一份、哪天又走岔。
+UNIT_PATH_RE = unit_universe.UNIT_PATH_RE
 
-#: 影子单位没有 UI 模块 —— 没有名字、没有角色、没有价格，**游戏里选不到**，
-#: 0 个 pack 指向它们。它们的存在要报一句，但不该占表里的行。
+#: 没有这条导出的 ``TEntityDescriptor`` 就不是可选单位：Mimetic 影子单位
+#: （模板实例化、0 个 pack 指向）与 District 贴图区块都在这一类里。
+#: 实测两个 mod 上「有导出」与「有 UI 模块」是**同一批对象**，所以这里只取前者,
+#: 它才是 pack 真正指向的东西；万一某个导出缺 UI 模块，那几行会缺角色/价格,
+#: 但**仍然在表里**，不会像以前那样整条消失。
+
+#: UI 模块。它提供名字/角色/价格，但**不是**装备的判据（判据是导出名，见上）：
+#: 少了它那几行会空着，可它仍然是 pack 能指向的东西，不该从表里消失。
 UI_MODULE = "TUnitUIModuleDescriptor"
 TYPE_MODULE = "TTypeUnitModuleDescriptor"
 FORM_MODULE = "TFormationModuleDescriptor"
@@ -190,7 +204,7 @@ class Lookup:
     notes: list[str] = field(default_factory=list)
     #: 悬空的 pack → 装备引用
     dangling: list[str] = field(default_factory=list)
-    #: 没有 UI 模块、未计入装备表的对象名
+    #: 没有 $/GFX/Unit 导出、未计入装备表的对象名
     skipped: list[str] = field(default_factory=list)
     #: 词条解析覆盖，``(已解出, 总数)``
     named: tuple[int, int] = (0, 0)
@@ -499,21 +513,27 @@ def build_lookup(mod: modlocator.ModPaths, *, lang: str = "SC") -> Lookup:
             "Config.ini 的 [Config] 段没有声明 GFX/Unit，但文件存在 —— 已照读；"
             "如果这个 mod 同时留着一份旧的 Unit.ndfbin，请确认读的是要用的那一份。"))
 
+    #: object_id -> ``Descriptor_Unit_X``，来自文件自己的导出表。
+    #: 这是单位的**身份**：pack 引用它、编辑器下拉框也用它。
+    exported = {oid: path.rsplit("/", 1)[-1]
+                for oid, path in (unit_info.get("exports") or {}).items()
+                if isinstance(path, str) and UNIT_PATH_RE.match(path)}
+
     for obj in unit_info["objects"]:
         if obj["class"] != "TEntityDescriptor":
             continue
+        descriptor = exported.get(obj["id"])
         class_name = _scalar(obj, "ClassNameForDebug")
-        if not isinstance(class_name, str) or not class_name.startswith(EQUIP_PREFIXES):
+        class_name = class_name if isinstance(class_name, str) else ""
+        if descriptor is None:
+            # 不是可选单位（Mimetic 影子单位 / 贴图区块）：报一句，不占行。
+            lookup.skipped.append(class_name or f"#{obj['id']}")
             continue
         modules = [by_id[mid] for mid in _module_ids(obj) if mid in by_id]
-        if not any(m["class"] == UI_MODULE for m in modules):
-            # 影子单位（Mimetic）与贴图区块：没有 UI 就没有名字/角色/价格，
-            # 游戏里选不到。报一句，不占行。
-            lookup.skipped.append(class_name)
-            continue
         item = Equipment(
-            descriptor="Descriptor_" + class_name,
-            class_name=class_name,
+            descriptor=descriptor,
+            # 显示名用作者写的调试名；它可能没有 Unit_ 前缀，那也照样显示。
+            class_name=class_name or _bare(descriptor),
             kind="building" if class_name.startswith("Building_") else "unit",
         )
         for module in modules:
@@ -535,15 +555,14 @@ def build_lookup(mod: modlocator.ModPaths, *, lang: str = "SC") -> Lookup:
                         item.name = resolved.text or ""
             elif cls == FORM_MODULE:
                 item.formation = _scalar(module, "TypeUnitFormation") or ""
-        item.is_new = bool(base.unit_names) and (
-            item.class_name[len("Building_"):] if item.kind == "building"
-            else item.class_name[len("Unit_"):]) not in base.unit_names
+        # 基线里的名字是 ``Descriptor_Unit_X`` 的 X —— 与 _bare 去前缀后的结果同形。
+        item.is_new = bool(base.unit_names) and _bare(descriptor) not in base.unit_names
         lookup.equipments.append(item)
 
     if lookup.skipped:
         lookup.notes.append(tr(
-            "另有 {n} 个 TEntityDescriptor 对象没有 UI 模块（Mimetic 影子单位/"
-            "贴图区块），没有名称、角色和价格，游戏里选不到，未计入装备表。",
+            "另有 {n} 个 TEntityDescriptor 对象没有 $/GFX/Unit 导出"
+            "（Mimetic 影子单位、贴图区块之类），不是可选单位，未计入装备表。",
             n=len(lookup.skipped)))
     # 按显示名排序：对象 id 的顺序是编译顺序，读表的人不按那个找东西。
     lookup.equipments.sort(key=lambda e: (e.label.lower(), e.class_name))
@@ -969,10 +988,11 @@ def render_html(lookup: Lookup) -> str:
 「完全无 pack {counts['none']}」= <b>想让它出现在将军模式，就得先生成一个 pack</b>
 （这就是「装备选择器里选不到」的那些）；「仅作载具 {counts['veh']}」= 只被别的 pack
 当运输工具引用，自己不是可选装备。{new_note}
-<br><span class="muted">装备口径：<code>TEntityDescriptor</code> 里
-<code>ClassNameForDebug</code> 以 <code>Unit_</code>/<code>Building_</code> 开头、
-且带 <code>TUnitUIModuleDescriptor</code> 的对象 —— 有 UI 才有名字、角色和价格，
-才可能出现在装备选择器里。</span>
+<br><span class="muted">装备口径：这个文件里**导出成
+<code>$/GFX/Unit/Descriptor_Unit_*</code>** 的实体 —— 导出名就是 pack 引用单位时
+用的那个字符串，所以「表里有」与「编辑器下拉框认得出」是同一批。
+<code>ClassNameForDebug</code> 只是显示名（作者可以不起 <code>Unit_</code> 前缀），
+不带 UI 模块的会缺角色与价格，但仍然在表里。</span>
 </div>
 {notes_html}
 
