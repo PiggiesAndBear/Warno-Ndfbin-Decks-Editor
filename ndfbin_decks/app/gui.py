@@ -572,8 +572,11 @@ class MainWindow(QMainWindow):
 
     def _build_filter_bar(self) -> QWidget:
         bar = QWidget()
-        row = QHBoxLayout(bar)
-        row.setContentsMargins(0, 0, 0, 0)
+        outer = QVBoxLayout(bar)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
+        row = QHBoxLayout()
+        outer.addLayout(row)
 
         row.addWidget(QLabel("Mod"))
         self.mod_box = QComboBox()
@@ -632,6 +635,26 @@ class MainWindow(QMainWindow):
             max(self.lang_box.findData(i18n.language()), 0))
         self.lang_box.currentIndexChanged.connect(self.on_language)
         row.addWidget(self.lang_box)
+
+        # Whole-mod, read-only actions get their own row under the language
+        # selector instead of sitting in the editing bar.  The five buttons up
+        # there are the edit/save loop — you use them on the row you just
+        # selected — while this one does not touch the deck you are looking at.
+        # Mixing the two makes the loop look longer than it is, and every
+        # future one-off tool (imports, reports, dumps) would push the loop
+        # buttons further from the tree.  Right-aligned so it sits under the
+        # language box and the row grows leftwards from there.
+        self.tool_row = QHBoxLayout()
+        self.tool_row.setContentsMargins(0, 0, 0, 0)
+        self.tool_row.addStretch(1)
+        outer.addLayout(self.tool_row)
+
+        self.export_btn = QPushButton()
+        self.export_btn.clicked.connect(self.on_export_lookup)
+        self.tool_row.addWidget(self.export_btn)
+        # Labelled by ``_label_actions`` together with the editing buttons, so
+        # both rows follow a language switch from one place.
+        self._tool_buttons: list = [(self.export_btn, self.on_export_lookup)]
         return bar
 
     def _build_actions(self) -> QWidget:
@@ -643,19 +666,23 @@ class MainWindow(QMainWindow):
         self._rt(lambda: self.info.setText(tr("选一个 mod 开始")))
         self.info.setWordWrap(True)
         row.addWidget(self.info, 1)
-        self._action_buttons: list = []
 
         # Written out rather than looped over a table of labels: ``tr()`` has to
         # be called *inside* the stored lambda, or a language switch would just
         # re-apply whatever the build-time call returned.  That also keeps every
         # key visible to ``tools/i18n_sync.py``, which reads source, not runtime.
+        created: list = []
         for slot in (self.on_set_count, self.on_swap, self.on_insert,
-                     self.on_remove, self.on_replace, self.on_export_lookup,
-                     self.on_save):
+                     self.on_remove, self.on_replace, self.on_save):
             btn = QPushButton()
             btn.clicked.connect(slot)
             row.addWidget(btn)
-            self._action_buttons.append((btn, slot))
+            created.append((btn, slot))
+        # The tools row lives in the filter bar; appended rather than prepended
+        # so the list reads in screen order — the editing loop on top, then the
+        # one-off tools underneath.  One list, so ``_label_actions`` relabels
+        # both rows on a language switch.
+        self._action_buttons = created + list(self._tool_buttons)
         self._rt(self._label_actions)
 
         # The title bar carries the tagline, so the window itself is where the
