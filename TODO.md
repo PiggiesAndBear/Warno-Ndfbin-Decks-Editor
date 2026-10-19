@@ -1074,6 +1074,22 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
         与 `doc/使用教程.md` 同类，不跟界面语言切）
 - [ ] **T15.7** 💡 未做：页面正文的英文版。如果哪天有英文用户，把 HTML 模板里的
       标题/表头也接进 `tr()` 即可 —— 目前判断不值得（使用者全是中文）
+- [x] **T15.8** ✅ **发布 v0.7**（2026-10-19）
+      —— `dist/Warno Ndfbin Decks Editor v0.7.exe`
+        **37,775,868 B** ｜ md5 `731cc44c29497c377efbdda6ab310687`
+      —— 内容 = 阶段 15 全部（`io/equip_lookup.py` + 动作栏入口 + 50 项测试）
+      —— 流水线照旧：`build_exe.py 0.7` → `verify_exe.py 0.7` → `cp` 进 `dist/`；
+        两侧 md5 一致；`dist/Decks编辑器使用教程.md` 一并刷新（48,543 B）
+      —— 包内 **168 载荷 / 144 冻结模块**（v0.6 是 141，多出的是新模块）；
+        `build_exe.check_bundled` 里新加的 `ndfbin_decks/io/equip_lookup` **命中 1**
+      —— ★ 另用解包挖串独立复核：EXE 里能挖到 `equip_lookup`（2 个模块）、
+        `导出装备清单`、`TUnitUIModuleDescriptor`、`Mimetic`、`StrategicPacks.ndf`
+        —— **证明真代码进了包**，不是只有清单里那一行
+      —— 热启动 **1.1 s**（三次 1.1 / 1.3 / 1.1；v0.6 量到 1.3 s，差异在噪声带，
+        载荷只大 68 KB）；新二进制冷启动 3.6 s（Defender）
+      —— 双环境（PySide6 6.12 / 6.3.2）**16/16 全 PASS**
+      —— ⚠️ 发版前把 `.venv/Scripts/python.exe` 误写成 `C:/Users/123/.venv/...`
+        一次（exit 127）—— 脚本没问题，是命令行手误；重跑即过
 
 ---
 
