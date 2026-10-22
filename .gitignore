@@ -23,6 +23,11 @@ venv/
 .vscode/
 .idea/
 
+# --- generated pages ------------------------------------------------------
+# `visualization/deck_tree.py` writes one ~3 MB HTML per mod.  It is an output,
+# reproducible with one command, so it does not belong in the history.
+编制结构-*.html
+
 # --- internal recon -------------------------------------------------------
 # Reconnaissance reports quote one specific mod's organisation, unit counts
 # and naming quirks.  They are development notes for this editor, not
