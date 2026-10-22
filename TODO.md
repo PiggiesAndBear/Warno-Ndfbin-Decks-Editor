@@ -1209,6 +1209,47 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
       —— 用法：`python visualization/deck_tree.py --mod <名称|工坊id> [--out x.html]`；
         不带 `--mod` 会列出本机的 mod
 
+- [x] **T16.7** ✅ **编辑器里加「生成编制图」按钮**（2026-10-22）
+      —— 放在**工具行**（筛选栏第二行、语言选择正下方），与「导出装备清单」并排 ——
+        两者都是**整 mod、只读、出一个 HTML**，不属于编辑环（编辑环那五个按钮都作用于
+        刚选中的那一行）
+      —— 按钮顺序即屏幕顺序：`导出装备清单` 在左、`生成编制图` 在最右（右缘与语言框
+        对齐 1390 px）—— 新工具继续往右加
+      —— 处理器 `on_build_tree` 与 `on_export_lookup` 同构：取 `session.mod` →
+        存盘对话框 → `deck_tree.build_tree` / `render_html` → 交底弹窗
+        （国家/师/营/连/排/条目/装备种数 + 体积 + 耗时；详情里给数据来源与三条说明）
+      —— ★ 默认文件名 `编制结构-<mod>-<日期>.html`，与 `.gitignore` 的规则同名；
+        英文界面用 `organization-chart-` 前缀，ignore 也补了这一条
+      —— **英文**：新增 12 条词表，`en.json` **327/327 (100%)**，0 待译 0 孤儿；
+        实测 `导出装备清单 / 生成编制图` ⇄ `Export equipment list /
+        Build organization chart`，切回中文也正确
+      —— 大数字加了千分位（`营 {b:,}` 等），182384 读成 182,384
+      —— 测试 `test_gui` 新增 **第 15 节 7 项**：两个按钮都存在、都不在编辑环里、
+        两行一起切语言并切回、**点按钮**（不是调方法）能写出 3.2 MB 的页面、
+        页面含内联数据、mod 文件 size+mtime 未变
+      —— ★ 踩到：`win.tree_btn.receivers(win.tree_btn.clicked)` 在 PySide6 6.12
+        报 `receivers(signal: str)` —— 改成**直接 `.click()`**，顺带把"按钮接线"
+        也验了
+      —— ★ 踩到：在 `main()` 里写 `from PySide6.QtWidgets import QFileDialog,
+        QMessageBox` 会把 `QMessageBox` 变成**整个函数的局部名**，导致前面第 57 行
+        `UnboundLocalError` —— 函数级 import 的作用域是**整个函数**，不是那一行之后
+- [x] **T16.8** ✅ **发布 v0.8**（2026-10-22）
+      —— `dist/Warno Ndfbin Decks Editor v0.8.exe`
+        **37,791,476 B** ｜ md5 `a3bf98d2c4b76b1a9581f2981c58855e`
+      —— 内容 = 阶段 16 全部（编制结构可视化 + 编辑器按钮 + 英文）
+      —— 包内 **168 载荷 / 146 冻结模块**（v0.7 是 144）；`check_bundled` 新增的
+        `visualization/deck_tree` **命中 1**
+      —— ★ 三层复核：挖 PYZ 找到 `visualization.deck_tree` / `on_build_tree` /
+        `tree_btn` / `生成编制图`；再用 `CArchiveReader` 把包里的 `en.json`
+        抽出来，确认 `生成编制图 → Build organization chart` 等 4 条都在（数据文件
+        不在 PYZ 里，搜字节是搜不到的）
+      —— 热启动 **1.3 s**（三次 1.3 / 1.3 / 1.6）；`verify_exe.py 0.8` 全过
+      —— 双环境（6.12 / 6.3.2）**17/17 全 PASS**
+      —— ⚠️ 回归里 `test_equip_lookup` 曾报 56/59：**样本 mod 被作者更新了**
+        （pack 5415 → 5431，`have/veh/none` 2248/317/1121 → 2259/319/1108，
+        装备总数与交叉表都没变）。已更新基准并在注释里写明：数字对不上时
+        **先怀疑 mod 更新**，真回归会表现为交叉表不自洽或出现悬空引用
+
 ---
 
 ## 易错点（都是本项目实际踩过的）

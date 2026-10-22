@@ -1465,6 +1465,60 @@ def main() -> int:
     theme.apply(app, mode)          # put the app back where it started
 
     print()
+    print("=== 15. the two whole-mod tools share one row, in both languages ===")
+    # 导出装备清单 and 生成编制图 act on the mod, not on the selected row, so they
+    # live under the language box rather than in the editing loop.  Both halves
+    # matter: the position (so the loop's five buttons do not grow) and the
+    # label (they go through the same ``_label_actions`` pass).
+    check("both tool buttons exist",
+          hasattr(win, "export_btn") and hasattr(win, "tree_btn"),
+          f"{getattr(win, 'export_btn', None)} / {getattr(win, 'tree_btn', None)}")
+    check("neither is in the editing loop",
+          all(b not in (win.export_btn, win.tree_btn)
+              for b, _slot in win._action_buttons[:6]),
+          str([b.text() for b, _s in win._action_buttons[:6]]))
+    # Wiring is checked by *clicking* it further down, not by asking Qt for the
+    # receiver count: PySide6 6.12 only accepts a string signature there, and a
+    # click also proves the handler and the button agree on the same slot.
+
+    zh = (win.export_btn.text(), win.tree_btn.text())
+    win.lang_box.setCurrentIndex(win.lang_box.findData("en"))
+    app.processEvents()
+    en = (win.export_btn.text(), win.tree_btn.text())
+    win.lang_box.setCurrentIndex(win.lang_box.findData("zh_CN"))
+    app.processEvents()
+    check("both rows switch language together",
+          zh == ("导出装备清单", "生成编制图")
+          and en == ("Export equipment list", "Build organization chart"),
+          f"{zh} -> {en}")
+    check("and the labels switch back", win.tree_btn.text() == "生成编制图",
+          win.tree_btn.text())
+
+    # The handler end to end: it must write a page and leave the mod alone.
+    import tempfile
+    out = Path(tempfile.mkdtemp()) / "tree.html"
+    deck_path = Path(win.session.mod.deck_bin)
+    before = (deck_path.stat().st_size, deck_path.stat().st_mtime_ns)
+    from PySide6.QtWidgets import QFileDialog
+    real_dialog, real_exec = QFileDialog.getSaveFileName, QMessageBox.exec
+    QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (str(out), ""))
+    QMessageBox.exec = lambda self: 0
+    try:
+        win.tree_btn.click()          # the button, not the method: wiring included
+        app.processEvents()
+    finally:
+        QFileDialog.getSaveFileName = real_dialog
+        QMessageBox.exec = real_exec
+    after = (deck_path.stat().st_size, deck_path.stat().st_mtime_ns)
+    check("生成编制图 writes a self-contained page",
+          out.is_file() and out.stat().st_size > 100_000,
+          f"{out.stat().st_size if out.is_file() else 0} B")
+    check("the page is the deck tree, not an error page",
+          out.is_file() and "const D = {" in out.read_text(encoding="utf-8"))
+    check("and the mod file is untouched",
+          before == after, f"{before} -> {after}")
+
+    print()
     if FAILURES:
         print(f"FAIL — {len(FAILURES)} check(s) failed: {FAILURES}")
         return 1

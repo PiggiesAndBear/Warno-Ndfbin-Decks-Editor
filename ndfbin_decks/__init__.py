@@ -3,7 +3,7 @@
 #: Single source of truth for the release number.  ``build_exe.py`` greps this
 #: line to name the artefact and ``main.py`` logs it at startup, so the file
 #: name, the version resource and the runtime report cannot disagree.
-__version__ = "0.7"
+__version__ = "0.8"
 
 #: The product, as it appears on the EXE, in its Properties dialog and in the
 #: log header.

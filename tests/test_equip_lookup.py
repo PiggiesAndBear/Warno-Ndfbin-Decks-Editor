@@ -37,11 +37,17 @@ PASS: list[str] = []
 FAIL: list[str] = []
 
 #: 样本 mod 的实测基准。改这些数字等于改验收标准，必须同时说明为什么。
+#:
+#: ★ 这个 mod 在**创意工坊上，作者随时会更新** —— 2026-10-22 那次就是它加了
+#: 16 个 pack（5415 → 5431），`have/veh/none` 跟着从 2248/317/1121 变成
+#: 2259/319/1108，而**装备总数和交叉表都没变**。所以数字对不上时先问一句
+#: 「是 mod 更新了吗」：真的回归会表现为交叉表不自洽、出现悬空引用、
+#: 或者装备总数变化，而不是只有 pack 侧的数字平移。
 BASE_TOTAL = 3686
-BASE_HAVE = 2248
-BASE_VEH = 317
-BASE_NONE = 1121
-BASE_PACKS = 5415
+BASE_HAVE = 2259
+BASE_VEH = 319
+BASE_NONE = 1108
+BASE_PACKS = 5431
 BASE_DECKS = 2265
 BASE_ORPHAN = 1885
 BASE_NEW = 775

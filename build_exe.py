@@ -233,6 +233,10 @@ def main() -> int:
         # 只从动作栏那个「导出装备清单」按钮进得去：少了它的构建照样能启动、
         # 照样能改牌组，只在有人想导出时才会炸。
         ("ndfbin_decks/io/equip_lookup", "the equipment lookup exporter"),
+        # Same reason, different button: 生成编制图 lives in a top-level package
+        # outside ``ndfbin_decks``, so this line is the only thing that notices
+        # if the import stops resolving.
+        ("visualization/deck_tree", "the organization chart exporter"),
         # Shipped as data, so the pattern has to name the file — see the
         # ``--add-data`` above.  Missing, the app still runs, in Chinese.
         ("ndfbin_decks/i18n/en.json", "the English interface table"),

@@ -59,6 +59,12 @@ from PySide6.QtWidgets import (
 from .. import APP_NAME, APP_TAGLINE, __version__
 from .. import paths
 from ..io import divisions, equip_lookup, modlocator
+# A top-level package next to the project, not inside ``ndfbin_decks``: the
+# visualization tools read the same files but are not part of the editor's own
+# import graph, and nothing in the editor depends on them existing.  Imported
+# here rather than inside the handler so PyInstaller's analysis keeps pulling
+# it into the bundle (``build_exe.check_bundled`` then asserts it arrived).
+from visualization import deck_tree
 from . import theme
 from .replace_dialog import ReplaceDialog
 from .session import Session, open_mod
@@ -649,12 +655,24 @@ class MainWindow(QMainWindow):
         self.tool_row.addStretch(1)
         outer.addLayout(self.tool_row)
 
+        # Added left to right, so the newest tool sits at the right edge under
+        # the language box and older ones shift left.  Two buttons is not a
+        # group yet, but the rule is what keeps this row from drifting into the
+        # editing bar one button at a time.
         self.export_btn = QPushButton()
         self.export_btn.clicked.connect(self.on_export_lookup)
         self.tool_row.addWidget(self.export_btn)
+
+        self.tree_btn = QPushButton()
+        self.tree_btn.clicked.connect(self.on_build_tree)
+        self.tool_row.addWidget(self.tree_btn)
+
         # Labelled by ``_label_actions`` together with the editing buttons, so
         # both rows follow a language switch from one place.
-        self._tool_buttons: list = [(self.export_btn, self.on_export_lookup)]
+        self._tool_buttons: list = [
+            (self.export_btn, self.on_export_lookup),
+            (self.tree_btn, self.on_build_tree),
+        ]
         return bar
 
     def _build_actions(self) -> QWidget:
@@ -707,6 +725,11 @@ class MainWindow(QMainWindow):
                 tr("把整个 Mod 的装备与 AG pack 导成一张单文件 HTML：\n"
                    "哪些装备有 pack、哪些没有、相对原版新增了哪些。\n"
                    "只读 —— 不碰 Mod 里的任何文件。")),
+            self.on_build_tree: (
+                tr("生成编制图"),
+                tr("把整个 Mod 的编制树导成一张单文件 HTML：\n"
+                   "国家 → 师 → 营 → 连 → 排 → 条目，可筛选、可看每个营的连线图，\n"
+                   "并按装备聚合。只读 —— 不碰 Mod 里的任何文件。")),
             self.on_save: (tr("保存"), tr("写回 Deck.ndfbin（先备份）")),
         }
         for btn, slot in self._action_buttons:
@@ -1479,6 +1502,83 @@ class MainWindow(QMainWindow):
         box.setDetailedText("\n".join(detail))
         box.setInformativeText(
             tr("「详细信息」里有读了哪些文件、有多少条对不上。"))
+        open_btn = box.addButton(tr("打开"), QMessageBox.AcceptRole)
+        box.addButton(tr("关闭"), QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is open_btn:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(out)))
+
+    # ---- 生成编制图 ----
+
+    def on_build_tree(self) -> None:
+        """把当前 mod 的整棵编制树导成一张单文件 HTML。
+
+        与「导出装备清单」同一类：整 mod、只读、一个文件。区别在它看的是**编制**
+        （国家 → 师 → 营 → 连 → 排 → 条目），而树的界面一次只显示一个营 ——
+        翻不出「这个 mod 整体长什么样、哪个营特别厚」。
+        """
+        mod = getattr(self.session, "mod", None) if self.session is not None else None
+        if mod is None:
+            QMessageBox.information(
+                self, tr("先选一个 Mod"),
+                tr("编制图要读这个 Mod 的 Deck.ndfbin，先在上面的 Mod 下拉框里选一个。"))
+            return
+        # 「编制结构」这个词也是 .gitignore 里的文件名前缀 —— 默认值落在项目
+        # 目录里时不会被误提交（生成物 3 MB，一条命令即可重做）。
+        default = Path.home() / (
+            f"{tr('编制结构')}-{mod.name}-{time.strftime('%Y%m%d')}.html")
+        path, _ = QFileDialog.getSaveFileName(
+            self, tr("生成编制图"), str(default), tr("网页 (*.html)"))
+        if not path:
+            return
+        out = Path(path)
+
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            payload = deck_tree.build_tree(mod)
+            out.write_text(deck_tree.render_html(payload), encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, tr("写不了文件"), f"{out}\n\n{exc}")
+            return
+        except Exception as exc:                       # noqa: BLE001
+            # A broken Deck.ndfbin is the only way here.  It has to become one
+            # sentence: an exception escaping a slot leaves the wait cursor set
+            # and the window unusable.
+            QMessageBox.warning(self, tr("生成不了这张图"),
+                                f"{type(exc).__name__}: {exc}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+
+        self._report_tree(payload, out)
+
+    def _report_tree(self, payload, out: Path) -> None:
+        meta = payload["meta"]
+        counts = meta["counts"]
+        box = QMessageBox(self)
+        box.setWindowTitle(tr("编制图已生成"))
+        box.setIcon(QMessageBox.Information)
+        size = out.stat().st_size / 1048576 if out.is_file() else 0.0
+        box.setText(tr(
+            "<b>{file}</b>　{size:.2f} MB　（{secs:.1f} 秒）<br><br>"
+            "国家 <b>{c}</b> · 师 <b>{d}</b> · 营 <b>{b:,}</b><br>"
+            "连 {co:,} · 排 {pl:,} · 条目 <b>{e:,}</b> · 装备种数 {u:,}",
+            file=out.name, size=size, secs=meta["elapsed"],
+            c=counts["countries"], d=counts["divisions"],
+            b=counts["battalions"], co=counts["companies"],
+            pl=counts["platoons"], e=counts["entries"],
+            u=meta["unique_equipment"]))
+        detail = [
+            tr("数据来源"),
+            f"  · {meta['deck']}（{meta['deck_bytes']:,} B）",
+            "",
+            tr("说明"),
+            tr("  · 六级：国家 → 师 → 营 → 连 → 排 → 条目；筛选框留空表示看全部"),
+            tr("  · 选中一个营后，右上角可以切到连线图"),
+            tr("  · 只读导出，不修改 Mod 里的任何文件"),
+        ]
+        box.setDetailedText("\n".join(detail))
+        box.setInformativeText(tr("页面断网也能用；「打开」在浏览器里查看。"))
         open_btn = box.addButton(tr("打开"), QMessageBox.AcceptRole)
         box.addButton(tr("关闭"), QMessageBox.RejectRole)
         box.exec()
