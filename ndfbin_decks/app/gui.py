@@ -1445,8 +1445,10 @@ class MainWindow(QMainWindow):
             return
         # 只有「装备速查」这个词进词表；文件名其余部分是 mod 名与日期，
         # 让翻译者去拼 `{prefix}-{name}-{date}` 这种模板没有意义。
+        # mod.name is the folder, and for a workshop mod that is a number.
+        # file_stem() is the readable one (Config.ini's Name), made safe.
         default = Path.home() / (
-            f"{tr('装备速查')}-{mod.name}-{time.strftime('%Y%m%d')}.html")
+            f"{tr('装备速查')}-{mod.file_stem()}-{time.strftime('%Y%m%d')}.html")
         path, _ = QFileDialog.getSaveFileName(
             self, tr("导出装备清单"), str(default), tr("网页 (*.html)"))
         if not path:
@@ -1526,7 +1528,7 @@ class MainWindow(QMainWindow):
         # 「编制结构」这个词也是 .gitignore 里的文件名前缀 —— 默认值落在项目
         # 目录里时不会被误提交（生成物 3 MB，一条命令即可重做）。
         default = Path.home() / (
-            f"{tr('编制结构')}-{mod.name}-{time.strftime('%Y%m%d')}.html")
+            f"{tr('编制结构')}-{mod.file_stem()}-{time.strftime('%Y%m%d')}.html")
         path, _ = QFileDialog.getSaveFileName(
             self, tr("生成编制图"), str(default), tr("网页 (*.html)"))
         if not path:

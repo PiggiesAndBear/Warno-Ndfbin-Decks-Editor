@@ -255,6 +255,29 @@ class ModPaths:
     def source_label(self) -> str:
         return SOURCE_LABELS.get(self.source, self.source)
 
+    def file_stem(self, *, fallback: str = "mod", limit: int = 80) -> str:
+        """A readable, filesystem-safe name for an exported file.
+
+        ``name`` is the **folder** name, and a workshop mod's folder is its
+        published id — ``3395350736``.  Using it to name a file hands the user
+        something they cannot recognise; ``label`` is what ``Config.ini`` calls
+        the mod (``Honor Or Death``), so that is what goes in the name.
+
+        The label is free text, though, and lands in a file name: ``:`` from
+        ``Berlin 1989: The Encirclement`` is legal in a title and illegal on
+        Windows, and a trailing dot makes a file the shell cannot create.  What
+        survives is the readable part; the id is still inside the page itself.
+        """
+        text = (self.label or self.name or "").strip()
+        # A colon in a title separates two halves ("Berlin 1989: The
+        # Encirclement"); flattening it to "-" gives "1989- The", which reads
+        # like a typo.  Give it the spaces a title separator wants.
+        text = re.sub(r"\s*:\s*", " - ", text)
+        text = re.sub(r'[<>"/\\|?*\x00-\x1f]', "-", text)
+        text = re.sub(r"\s+", " ", text).strip(" .")
+        text = text[:limit].strip(" .")
+        return text or fallback
+
     # -- convenience ------------------------------------------------------
     @property
     def deck_bin(self) -> Path:

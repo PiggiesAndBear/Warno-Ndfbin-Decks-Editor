@@ -174,6 +174,15 @@ def main() -> int:
         check("the AGF pseudo-country is kept, not dropped as 'not a country'",
               any(x[0] == "AGF" for x in berlin["c"]),
               str([x[0] for x in berlin["c"]]))
+        berlin_mod = modlocator.resolve(BERLIN)
+        check("the page is titled with the readable name, not the folder",
+              berlin["meta"]["mod"] == berlin_mod.label
+              and berlin["meta"]["mod_folder"] == berlin_mod.name,
+              f"{berlin['meta']['mod']!r} / {berlin['meta']['mod_folder']!r}")
+        check("and the export file name is readable and legal",
+              ":" not in berlin_mod.file_stem()
+              and berlin_mod.file_stem().startswith("AG Framework"),
+              berlin_mod.file_stem())
     else:
         print("  --   Berlin is not installed, skipped")
 

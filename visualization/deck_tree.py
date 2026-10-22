@@ -165,7 +165,12 @@ def build_tree(mod, *, lang: str = "SC") -> dict:
     deck_path = Path(mod.deck_bin)
     return {
         "meta": {
-            "mod": mod.name,
+            # The readable name, not the folder: a workshop mod's folder is
+            # its published id, and "3395350736 · 编制结构" says nothing about
+            # which mod the page is.  The folder is kept separately so the
+            # header can name it when the two differ.
+            "mod": mod.label or mod.name,
+            "mod_folder": mod.name,
             "deck": deck_path.name,
             "deck_bytes": deck_path.stat().st_size if deck_path.is_file() else 0,
             "generated": time.strftime("%Y-%m-%d %H:%M"),
@@ -204,6 +209,10 @@ def render_html(payload: dict) -> str:
             .replace("__TITLE__", _escape(f"{meta['mod']} · 编制结构"))
             .replace("__MOD__", _escape(meta["mod"]))
             .replace("__SUMMARY__", _escape(summary))
+            .replace("__FOLDER__", _escape(
+                f"文件夹 {meta['mod_folder']} · "
+                if meta.get("mod_folder") and meta["mod_folder"] != meta["mod"]
+                else ""))
             .replace("__SOURCE__", _escape(
                 f"{meta['deck']}（{meta['deck_bytes']:,} B） · "
                 f"生成于 {meta['generated']} · {meta['app']}"))
@@ -334,7 +343,7 @@ footer{padding:6px 18px; color:var(--muted); font-size:11px; background:var(--pa
 <header>
   <h1>__MOD__<span class="badge">编制结构</span></h1>
   <div class="sub"><b>__SUMMARY__</b></div>
-  <div class="sub">__SOURCE__ · 只读导出</div>
+  <div class="sub">__FOLDER____SOURCE__ · 只读导出</div>
 </header>
 
 <div class="toolbar">
@@ -897,7 +906,7 @@ def main(argv=None) -> int:
     print(f"读取 {mod.name} …")
     payload = build_tree(mod, lang=args.lang)
     html = render_html(payload)
-    out = Path(args.out) if args.out else Path(f"编制结构-{mod.name}.html")
+    out = Path(args.out) if args.out else Path(f"编制结构-{mod.file_stem()}.html")
     out.write_text(html, encoding="utf-8")
 
     c = payload["meta"]["counts"]

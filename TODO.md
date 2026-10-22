@@ -1250,6 +1250,41 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
         装备总数与交叉表都没变）。已更新基准并在注释里写明：数字对不上时
         **先怀疑 mod 更新**，真回归会表现为交叉表不自洽或出现悬空引用
 
+- [x] **T16.9** ✅ **导出文件名用 mod 的可读名，不用工坊 id**（2026-10-22 用户要求）
+      —— 病灶：`mod.name` 是**文件夹名**，而工坊 mod 的文件夹就是它的发布 id ——
+        导出出来是 `编制结构-3395350736-20261022.html`，没人认得那是哪个 mod
+      —— 正解：`ModPaths.label`（`Config.ini` 的 `Name`，如 `Honor Or Death`）
+      —— 新增 `ModPaths.file_stem()`：label 优先、回落 name；
+        ★ 但 label 是**自由文本**，会带 Windows 不收的字符 ——
+        `AG Framework - Berlin 1989: The Encirclement` 里的冒号让文件根本建不出来。
+        所以：冒号先按 `空格-空格` 展开（`1989: The` → `1989 - The`，
+        直接换成 `-` 会读成 `1989- The` 这种笔误感），其余 `<>"/\\|?*` 与控制字符
+        换成 `-`，压缩空白、去掉首尾的点与空格（Windows 不允许结尾点），
+        截到 80 字，全空则回落 `mod`
+      —— 四个入口统一走它：GUI 的两个导出按钮、两个 CLI 的默认文件名
+        （`equip_lookup._safe_name` 那份重复实现已删）
+      —— ★ 顺手修了页面标题：编制图的 `<title>` / `<h1>` 以前也印文件夹名，
+        现在印 label；两者不同时，来源行前面加一句「文件夹 <id>」便于对照
+      —— 实测：柏林 `编制结构-AG Framework - Berlin 1989 - The Encirclement-20261022.html`；
+        工坊 3395350736 `Honor Or Death`；3388575848 `A World in Flames`
+      —— 测试：`test_gui` 第 15 节加 2 项（把 label 临时改成 `Test: A Mod/Name`，
+        断言默认名含可读名且不含 `: / \\`）；`test_visualization` 加 2 项
+        （页面 meta 的 mod 是 label、种子名合法）
+      —— ⚠️ 踩到：测试里第二次调 `on_build_tree` 时只桩了文件对话框、
+        **没桩 `QMessageBox.exec`**（前一段的 finally 已经把真的装回去了）→
+        真的弹了模态框，测试挂了 10 分钟才被 kill。**每段都要自己桩、自己还原**
+- [x] **T16.10** ✅ **按 0.8 重打包（文件名修正版）**（2026-10-22，用户要求「直接打包」）
+      —— `dist/Warno Ndfbin Decks Editor v0.8.exe` 就地覆盖
+        **37,792,112 B** ｜ md5 `2126c9c930ae547ead41256dfb5aec75`
+        （覆盖前 `a3bf98d2c4b76b1a9581f2981c58855e`，已归档到
+        `_pre_fix_backup/v0.8_before_filename_fix.exe` —— 与构建目录无关，不会被清）
+      —— `verify_exe.py 0.8` 全过；包内 168 载荷 / **146 冻结模块**
+      —— ★ 挖串：`file_stem`（4 模块）/ `mod_folder`（1）/ `文件夹 `（1）——
+        文件名逻辑真进包，不是只改了源码
+      —— 热启动 **1.3 s**（1.3 / 1.3 / 1.6，与上一版相同）
+      —— 回归：环境一 **17/17 全 PASS**；环境二跑到第 11 项时用户叫停（已跑的 11 项全绿），
+        改动的四条路径（gui / modlocator / equip_lookup / deck_tree）在环境一均已覆盖
+
 ---
 
 ## 易错点（都是本项目实际踩过的）

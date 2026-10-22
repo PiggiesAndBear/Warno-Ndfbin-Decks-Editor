@@ -1104,7 +1104,7 @@ def main(argv: list[str] | None = None) -> int:
         return 3
 
     out = Path(args.out) if args.out else Path(
-        f"装备速查-{_safe_name(mod.name)}-{time.strftime('%Y%m%d')}.html")
+        f"装备速查-{mod.file_stem()}-{time.strftime('%Y%m%d')}.html")
     out.write_text(render_html(lookup), encoding="utf-8")
 
     counts = lookup.counts()
@@ -1120,10 +1120,6 @@ def main(argv: list[str] | None = None) -> int:
 
 def lookup_error_prefix() -> str:
     return "导不出这张表："
-
-
-def _safe_name(name: str) -> str:
-    return re.sub(r'[<>:"/\\|?*]', "_", name)
 
 
 if __name__ == "__main__":

@@ -1518,6 +1518,31 @@ def main() -> int:
     check("and the mod file is untouched",
           before == after, f"{before} -> {after}")
 
+    # A workshop mod's folder is its published id, so the suggested file name
+    # has to come from the display label — and that label is free text, which
+    # means it can carry characters Windows refuses in a path.
+    suggested = {}
+    QFileDialog.getSaveFileName = staticmethod(
+        lambda parent, title, start, filt: (suggested.setdefault("start", start), ""))
+    # The report dialog has to be stubbed again: the block above put the real
+    # exec back, and a real modal here waits for a click that never comes —
+    # which is exactly how this test hung for ten minutes the first time.
+    QMessageBox.exec = lambda self: 0
+    real_label = win.session.mod.label
+    win.session.mod.label = "Test: A Mod/Name"
+    try:
+        win.on_build_tree()
+        app.processEvents()
+    finally:
+        win.session.mod.label = real_label
+        QFileDialog.getSaveFileName = real_dialog
+        QMessageBox.exec = real_exec
+    name = Path(suggested.get("start", "")).name
+    check("the suggested file name is the readable label",
+          "A Mod" in name and "Test" in name, name)
+    check("characters Windows forbids are replaced, not passed through",
+          ":" not in name and "/" not in name and "\\" not in name, name)
+
     print()
     if FAILURES:
         print(f"FAIL — {len(FAILURES)} check(s) failed: {FAILURES}")
