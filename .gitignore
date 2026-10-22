@@ -22,6 +22,9 @@ venv/
 .workbuddy/
 .vscode/
 .idea/
+# `tools/run_tests.py` remembers how long each test took so the next run can
+# start the slow ones first.  Machine-specific timing, not a source.
+.test_times.json
 
 # --- generated pages ------------------------------------------------------
 # `visualization/deck_tree.py` writes one ~3 MB HTML per mod.  It is an output,

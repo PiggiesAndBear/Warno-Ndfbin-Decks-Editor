@@ -1312,6 +1312,7 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
 | ★ **把 `trans_ref` 的 index 当成 `TRAN` 下标** | 写入后 `Unresolved CNDF import index`。该 index 实为 **`IMPR` 路径树的节点 id**（节点 0 = `$` 根）        | T4.1 ✅已修正                               |
 | ★ **先追加对象再重建路径树**                        | 顺序反了。`append_graph_objects` 会即时校验 ⇒ 必失败。必须**先长树→回填 id→再追加**                             | T4.1 ✅已修正                               |
 | ★ **把 `Battalion` 缓存跨过一次编辑**            | 它是**快照**：`invalidate()` 之后活对象换了一批，缓存还指着旧的 → 两个视图来自两个时刻（树旧、表新），看着像"错乱" | **T12.2** ✅按 id 重取 / 编辑后重建作用域缓存 |
+| ★ **以为测试脚本 `python tests/x.py` 与 `python -m tests.x` 等价** | 两个文件（`test_divisions` / `test_unit_universe`）只把 `tests/` 进 `sys.path`、不 import `_env`，直接运行即 `ModuleNotFoundError: ndfbin_decks` —— 单跑它们时容易读成"项目坏了" | 2026-10-22 ✅`tools/run_tests.py` 统一设 `PYTHONPATH=<root>` |
 
 ---
 
@@ -1346,3 +1347,5 @@ python -m tests.test_differ            # 两层 diff        39/39 检出
 | 2026-10-13 | ★ **筛选链固化**（师下拉跳回第一个师） | ★ 根因：`_last_data` 只有 `set_options` / `_pick_text` 两条路径写入，**鼠标点下拉行**走的是 Qt 自己的 `currentIndexChanged`，`_last_data` 还停在默认值 27GMRD ⇒ 模态框抢焦点 → `focusOut → _restore()` 悄悄把索引设回 27GMRD（信号被 block，当场看不出来）→ 替换后 `_fill_tree` 读到 27GMRD。<br />"有时"= 打字+回车走 `_pick_text`（正确）不跳，鼠标点选才跳。<br />修三处：`_sync_edit` 记录已提交行 / `_restore` 无搜索时直接返回 / `set_options` 静默且原子（blockSignals）<br />新增 test_gui 3d「筛选链固化」；双环境 14/14 PASS；v0.1 原地重建（md5 `6eca8cea…`），提交 `a5ac887` |
 
 | 2026-10-13 | **阶段 8 立项** | 用户提两项新需求：① 界面本地化（EN/FR/DE/RU）；② 批量替换一换一 → 多换一。<br />★ 两项都**先量规模再定方案**：本地化 392 处字面量 / 去重 299 条 / 2833 字；<br />多换一用 Test 文件实测 3 源 1 目标 = 211 条装备，0 error、W1 19/19 成立、非来源 863 条零改动。<br />⇒ 多换一的**数据层只改一个谓词**，本地化的**瓶颈是 299 处改造不是 1196 条译文** |
+
+| 2026-10-22 | ★ **测试并行化**（`tools/run_tests.py`） | 用户问"环境内的一系列测试可以并行吗"。实测**可以**，按**文件**粒度（16 个 `test_*.py` 各自是独立程序，天然进程边界）。<br />★ 安全性依据：写盘全部走 `tempfile.mkdtemp`（quantity/structure/variants/equip_lookup/visualization 逐个核过）；`test_release` 只**读** `dist/` 与 `build_exe.py`；唯一的环境级状态是 `QApplication`，而**每进程一个**正是它需要的 —— 所以必须进程并行，线程池会撞上"一个进程只能有一个 QApplication"。<br />★ 实测（16 核 / 27.5 GB）：环境一 **139.1 s**（零件和 565.1 s，**4.06×**）；环境二 **121.8 s**（592.8 s，**4.87×**）。两边 **16/16 全 PASS**、`test_release` 均为 32 项。<br />★ 抢到的关键收益不在并行度而在**调度**：`test_quantity` 112 s / `test_localisation` 105 s / `test_structure` 72 s 三个长尾先开，`test_gui` 只 44 s（原先以为它是大头，实测只占 8%）。上次耗时记在 `.test_times.json`（已 gitignore）供下次最长优先。<br />★ 踩坑：`test_divisions` / `test_unit_universe` 只把 `tests/` 进 `sys.path`、不 import `_env`，故只在 `python -m tests.test_x` 下能跑；runner 用 `python tests/test_x.py` 直接 `ModuleNotFoundError: ndfbin_decks`。修法是 runner 设 `PYTHONPATH=<root>`，**不动测试文件**（`-m` 用法仍然有效）。 |
