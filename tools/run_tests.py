@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """Run the script-style test suite in parallel — one process per file.
 
-The suite is seventeen ``tests/test_*.py`` files, each of which is a whole
+The suite is seventeen units: sixteen ``tests/test_*.py`` files plus the
+codec's own round trip, each of which is a whole
 program: it imports, prints a hundred lines of progress, and exits 0 with
 ``PASS`` or 1 with a traceback.  That shape has one convenient property — the
 unit of work is already a process boundary — and it is why this runner can be
@@ -49,6 +50,13 @@ ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 TIMES = ROOT / ".test_times.json"
 
+#: The regression is **seventeen** items, not sixteen: the byte-level round
+#: trip lives beside the code it checks, as ``ndfbin_decks.selfcheck``, rather
+#: than in ``tests/``.  Leaving it out would let this runner print "16/16 green"
+#: over a run that never verified the codec — the most expensive way to be
+#: wrong, because the number looks complete.
+MODULES = ["ndfbin_decks.selfcheck"]
+
 #: Per-file ceiling.  The slowest file is around four minutes; a file that
 #: hangs is a bug (a modal dialog nobody stubbed — that has happened), and the
 #: point of the ceiling is to report it as a failure instead of blocking the
@@ -56,12 +64,15 @@ TIMES = ROOT / ".test_times.json"
 DEFAULT_TIMEOUT = 900
 
 
-def discover(patterns: list[str]) -> list[Path]:
-    files = sorted(p for p in TESTS.glob("test_*.py"))
+def discover(patterns: list[str]) -> list[tuple[str, list[str]]]:
+    """``[(label, argv), ...]`` — one entry per unit of work."""
+    jobs = [(p.stem, [sys.executable, str(p)])
+            for p in sorted(TESTS.glob("test_*.py"))]
+    jobs += [(m.rsplit(".", 1)[-1], [sys.executable, "-m", m]) for m in MODULES]
     if patterns:
-        files = [p for p in files
-                 if any(pat.lower() in p.stem.lower() for pat in patterns)]
-    return files
+        jobs = [j for j in jobs
+                if any(pat.lower() in j[0].lower() for pat in patterns)]
+    return jobs
 
 
 def remembered() -> dict[str, float]:
@@ -72,11 +83,11 @@ def remembered() -> dict[str, float]:
         return {}
 
 
-def run_one(path: Path, timeout: int, env: dict) -> dict:
+def run_one(label: str, argv: list[str], timeout: int, env: dict) -> dict:
     started = time.perf_counter()
     try:
         proc = subprocess.run(
-            [sys.executable, str(path)],
+            argv,
             cwd=str(ROOT), env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             timeout=timeout,
@@ -92,8 +103,7 @@ def run_one(path: Path, timeout: int, env: dict) -> dict:
     # them, rather than as a failure.
     skipped = code == 0 and "\nSKIP" in "\n" + text
     return {
-        "file": path.stem,
-        "path": path,
+        "file": label,
         "code": code,
         "seconds": elapsed,
         "text": text,
@@ -122,7 +132,7 @@ def main() -> int:
         return 0
 
     remembered_times = remembered()
-    files.sort(key=lambda p: -remembered_times.get(p.stem, 0.0))
+    files.sort(key=lambda j: -remembered_times.get(j[0], 0.0))
 
     cores = os.cpu_count() or 4
     # Two cores left alone: the machine has to stay usable, and these tests are
@@ -147,13 +157,14 @@ def main() -> int:
         tempfile.mkdtemp(prefix="ndfdecks-tests-"))
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"{len(files)} files, jobs={jobs}, python={sys.version.split()[0]}")
+    print(f"{len(files)} units, jobs={jobs}, python={sys.version.split()[0]}")
     print(f"logs: {log_dir}")
 
     began = time.perf_counter()
     results: list[dict] = []
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        futures = [pool.submit(run_one, p, args.timeout, env) for p in files]
+        futures = [pool.submit(run_one, label, argv, args.timeout, env)
+                   for label, argv in files]
         for fut in futures:
             r = fut.result()
             results.append(r)
@@ -182,13 +193,17 @@ def main() -> int:
                   f"  -> {log_dir / (r['file'] + '.log')}")
 
     # Remember durations for the longest-first scheduling of the next run.
-    # Only a full green run is worth learning from: a run that died early
-    # records misleadingly short times.
+    # Only a green run is worth learning from: a run that died early records
+    # misleadingly short times.  Merged rather than replaced, because
+    # ``--only`` runs are how most of them happen and overwriting would erase
+    # every other file's timing -- which is precisely the ordering this
+    # exists to provide.
     if not failed:
         try:
             TIMES.write_text(json.dumps(
-                {r["file"]: round(r["seconds"], 2) for r in results}, indent=2),
-                encoding="utf-8")
+                {**remembered_times,
+                 **{r["file"]: round(r["seconds"], 2) for r in results}},
+                indent=2), encoding="utf-8")
         except OSError:
             pass
 
