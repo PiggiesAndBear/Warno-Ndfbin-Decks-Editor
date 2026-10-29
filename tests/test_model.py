@@ -3,7 +3,7 @@
 Two things are asserted:
 
 1. **The model parses the structure correctly.**  Counts must match the recon
-   figures: 2208 AG decks + 128 filtered for vanilla-derived files, 42258 /
+   figures: 2208 AG decks + 130 filtered for vanilla-derived files, 42258 /
    43118 platoons, and the same 16 nameless smart groups.
 2. **The thresholds are right.**  Every AG deck in all four datasets must pass
    the hard checks with **zero** errors.  If a "hard" rule fires on vanilla,
@@ -37,7 +37,11 @@ DATASETS = [
 
 #: expected (ag_pawn, skirmish) per dataset
 EXPECTED = {
-    "Test":       (2208, 128),
+    # 130, not 128: on 2026-10-29 this mod (then still called ``Test``) added
+    # two skirmish decks of its own alongside its new units.  The AG count is
+    # unchanged at 2208, which is what says the two extras are PvP rather
+    # than new battalions.
+    "Test":       (2208, 130),
     "Berlin":     (2266, 128),
     "N.Thunder":  (2337, 128),
 }

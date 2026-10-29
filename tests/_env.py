@@ -29,6 +29,7 @@ naturally.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -51,7 +52,16 @@ if str(ROOT) not in sys.path:
 #: Mod directory names the suite is written against.  ``NORTHERN_THUNDER`` is a
 #: Steam Workshop mod and is named by its published id, because that is what
 #: its folder is called.
-TEST = "Test"
+#:
+#: ``TEST`` is the one that moves.  It was called ``Test`` until 2026-10-29,
+#: when its author renamed it to ``ShowCase-FPV Strike`` — and a hard-coded
+#: name turned the whole suite into silent skips that still exited 0.  Every
+#: reference must go through this constant (not a literal) so the next rename
+#: is a one-line change, and ``NDFDECKS_TEST_MOD`` makes it a *zero*-line one
+#: for a single run::
+#:
+#:     NDFDECKS_TEST_MOD="WarnoAGF_berlin_1989" python tools/run_tests.py
+TEST = os.environ.get("NDFDECKS_TEST_MOD") or "ShowCase-FPV Strike"
 BERLIN = "WarnoAGF_berlin_1989"
 NORTHERN_THUNDER = "3816950018"
 

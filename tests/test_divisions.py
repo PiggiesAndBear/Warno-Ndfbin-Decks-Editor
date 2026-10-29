@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _env import TEST                                  # noqa: E402
 from ndfbin_decks.io import modlocator, divisions as D    # noqa: E402
 
 FAILURES: list[str] = []
@@ -77,10 +78,10 @@ def main() -> int:
         print("SKIP — no mod workspace")
         return 0
     from ndfbin_decks.app.session import open_mod
-    if "Test" not in mods:
-        print("SKIP — Test mod not installed")
+    if TEST not in mods:
+        print(f"SKIP — {TEST} mod not installed")
         return 0
-    session = open_mod("Test")
+    session = open_mod(TEST)
     divs = session.divisions()
     codes = {D.country_code(d.path) for d in divs}
     check("every division yields a country", "" not in codes,

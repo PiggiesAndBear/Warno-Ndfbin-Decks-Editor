@@ -43,13 +43,18 @@ FAIL: list[str] = []
 #: 2259/319/1108，而**装备总数和交叉表都没变**。所以数字对不上时先问一句
 #: 「是 mod 更新了吗」：真的回归会表现为交叉表不自洽、出现悬空引用、
 #: 或者装备总数变化，而不是只有 pack 侧的数字平移。
+#:
+#: ★ 2026-10-29 又来一次：packs 5431 → 5454（+23），orphan 1885 → 1896，
+#: have/veh/none 2259/319/1108 → 2267/322/1097。判据仍然是老三样 ——
+#: **装备总数 3686 未变、交叉表 2267+322+1097==3686 自洽、无悬空**，
+#: 所以是作者新增了 pack 让 11 件装备从「无 pack」归了档，不是 JOIN 坏了。
 BASE_TOTAL = 3686
-BASE_HAVE = 2259
-BASE_VEH = 319
-BASE_NONE = 1108
-BASE_PACKS = 5431
+BASE_HAVE = 2267
+BASE_VEH = 322
+BASE_NONE = 1097
+BASE_PACKS = 5454
 BASE_DECKS = 2265
-BASE_ORPHAN = 1885
+BASE_ORPHAN = 1896
 BASE_NEW = 775
 BASE_SKIPPED = 940
 

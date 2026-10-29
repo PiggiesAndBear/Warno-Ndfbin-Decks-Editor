@@ -13,6 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _env import TEST                              # noqa: E402
 from ndfbin_decks.core import cndf_codec          # noqa: E402
 from ndfbin_decks.io import modlocator, unit_universe as uu    # noqa: E402
 
@@ -34,8 +35,8 @@ def main() -> int:
         return 0
 
     print("=== 1. the three sources are found ===")
-    test_mod = mods.get("Test")
-    check("Test is discoverable", test_mod is not None)
+    test_mod = mods.get(TEST)
+    check(f"{TEST} is discoverable", test_mod is not None)
     base_zip = uu.find_base_zip(test_mod)
     check("ModGen's baseline archive is located",
           base_zip is not None and base_zip.is_file(), str(base_zip))

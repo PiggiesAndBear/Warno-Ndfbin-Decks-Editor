@@ -20,7 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _env import (NORTHERN_THUNDER, mods as discover_mods,  # noqa: E402
+from _env import (NORTHERN_THUNDER, TEST, mods as discover_mods,  # noqa: E402
                   opt_mod_dir)
 from ndfbin_decks.core import cndf_codec              # noqa: E402
 from ndfbin_decks.io import agfilter, modlocator, provenance   # noqa: E402
@@ -35,7 +35,13 @@ EXPECTED = {
     #            ag_total == vanilla_ag + authored, because AG decks are
     #            exactly the vanilla AG ones plus mod-authored ones.  The
     #            128 promoted decks are PvP and fall outside the AG scope.
-    "Test":                      (2208, 128,   0, 128, 0),
+    # Keyed by the mod's directory name, which is what ``targets`` carries --
+    # so it has to follow ``_env.TEST``, or a rename silently stops checking
+    # anything (the ``exp is None`` branch only prints a note).
+    # 2026-10-29: this mod gained two skirmish decks of its own, so the split
+    # moved from (128, 0) to (130, 2).  AG stays 2208 -- the two extras are
+    # PvP, not new battalions -- and promoted stays 128.
+    TEST:                        (2208, 130,   2, 128, 0),
     "WarnoAGF_berlin_1989":      (2266, 186,  58, 128, 0),
     "Northern Thunder":          (2337, 257, 129, 128, 0),
 }
@@ -134,7 +140,7 @@ def main() -> int:
         return 1
     print("PASS — provenance classification matches the recon figures.")
     print()
-    print("Note: 'Test' adds nothing; it edits vanilla decks in place.  A")
+    print(f"Note: {TEST!r} adds nothing; it edits vanilla decks in place.  A")
     print("      prefix-based scan would report zero changes for it.")
     return 0
 

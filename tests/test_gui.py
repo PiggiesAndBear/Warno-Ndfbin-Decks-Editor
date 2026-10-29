@@ -91,8 +91,8 @@ def main() -> int:
           win.mod_box.count() >= 3, f"{win.mod_box.count()} items")
     check("placeholder holds no mod name",
           win.mod_box.itemData(0) is None)
-    test_idx = win.mod_box.findData("Test")
-    check("Test is selectable", test_idx > 0, str(test_idx))
+    test_idx = win.mod_box.findData(_env.TEST)
+    check(f"{_env.TEST} is selectable", test_idx > 0, str(test_idx))
     broken = [i for i in range(win.mod_box.count())
               if not win.mod_box.model().item(i).isEnabled()]
     check("a mod without Deck.ndfbin is unselectable",
@@ -130,7 +130,7 @@ def main() -> int:
     import shutil
     import tempfile
     from PySide6.QtWidgets import QFileDialog
-    test_mod = next((m for m in modlocator.discover() if m.name == "Test"
+    test_mod = next((m for m in modlocator.discover() if m.name == _env.TEST
                      and Path(m.deck_bin).is_file()), None)
     real_picker = QFileDialog.getExistingDirectory
     before_n = win.mod_box.count()
@@ -198,11 +198,17 @@ def main() -> int:
     # which was always a latent fragility: a swap can bring a pack the AG decks
     # never used into reach, and then "2690" is no longer a fact about the file
     # in front of it.
+    #
+    # 2026-10-29: 2483 -> 2489.  The mod (then called ``Test``) added two
+    # skirmish decks of its own; those reference six packs that had been in the
+    # unreferenced bucket, so they moved to "PvP-only".  The AG-usable count is
+    # unchanged at 2690 and the three buckets still add up -- which is what
+    # separates a content update from a broken gate.
     cat0 = s.get_catalogue()
     base_ag, base_pvp = len(cat0), cat0.stats.skirmish_only
     base_total = cat0.stats.total_packs
     check("the AG gate reports the shipped file's numbers",
-          (base_ag, base_pvp) == (2690, 2483), f"{base_ag} / {base_pvp}")
+          (base_ag, base_pvp) == (2690, 2489), f"{base_ag} / {base_pvp}")
     check("and puts every pack in one of its three buckets",
           base_ag + base_pvp + cat0.stats.unreferenced == base_total,
           f"{base_ag} + {base_pvp} + {cat0.stats.unreferenced} "
@@ -1136,7 +1142,7 @@ def main() -> int:
     gui_mod.SwapDialog = real_swap.SwapDialog
     SwapDialog = real_swap.SwapDialog
     check("catalogue came from the open file",
-          "Test" in cat.source_path, cat.source_path)
+          _env.TEST in cat.source_path, cat.source_path)
     # Not the shipped numbers — those are pinned in section 2.  What has to
     # hold after several hundred edits is the *relation*: the gate still puts
     # every pack in one of its three buckets, the pool it draws from has not
