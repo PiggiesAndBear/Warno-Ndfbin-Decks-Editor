@@ -21,7 +21,8 @@ from ..edit.bulk import ScopedReplace
 from ..edit.equip import DeckEditor, PackKey
 from ..edit.quantity import RetileResult, Retiler
 from ..edit.structure import StructureEditor
-from ..io import agfilter, divisions, localisation, modlocator, unit_universe
+from ..io import (agfilter, division_names, divisions, localisation,
+                  modlocator, unit_universe)
 from .catalog import PackCatalogue, ag_pack_ids
 from ..i18n import tr
 
@@ -103,6 +104,8 @@ class Session:
     _mod: object = None
     #: every unit this mod can field — built lazily, see :meth:`get_units`
     _units: object = None
+    #: readable division names — built lazily, see :meth:`named_divisions`
+    _div_names: object = None
     resolver: localisation.NameResolver | None = None
     dirty: bool = False
     #: deck object id -> human label for the change log
@@ -206,6 +209,24 @@ class Session:
         return next((b for b in self.battalions()
                      if b.deck_object_id == deck_object_id), None)
 
+    def named_divisions(self) -> division_names.DivisionNames:
+        """Readable 师 names, or an empty resolver when the mod ships none.
+
+        Lazy because it decodes ``Division.ndfbin`` and reads every ``.dic`` in
+        the mod (0.3 s on each of the three sample mods) — that must not be in
+        the path of opening a loose copy, and most callers never touch a 师.
+
+        **Resolution is usually partial, and the callers must degrade.**  Only
+        the divisions a mod author created have a dictionary entry: measured
+        Berlin 5/389, ShowCase 1/386, Northern Thunder 128/513.  Vanilla
+        divisions name a hash that lives in the game's own sealed archive, so
+        they keep the export-name label they always had (see
+        :func:`~..io.divisions.division_label`).
+        """
+        if self._div_names is None:
+            self._div_names = division_names.from_mod(self._mod)
+        return self._div_names
+
     def divisions(self) -> list[Division]:
         """AG battalions grouped into divisions (师), biggest first.
 
@@ -217,7 +238,12 @@ class Session:
         groups: dict[str, list] = {}
         for b in self.battalions():
             groups.setdefault(b.division or "", []).append(b)
-        out = [Division(path=key, label=_division_label(key),
+        # A dictionary name when the mod ships one, else the export-name label.
+        # The country stays derived from the *path* either way, so a translated
+        # name cannot move a division to a different contingent.
+        named = self.named_divisions()
+        out = [Division(path=key,
+                        label=named.resolve(key) or _division_label(key),
                         battalions=sorted(val, key=lambda x: x.export_name),
                         country=divisions.country_code(key))
                for key, val in groups.items()]

@@ -229,6 +229,10 @@ def main() -> int:
         ("ndfbin_decks/app/theme", "the light/dark palette"),
         ("ndfbin_decks/app/swap_dialog", "the equipment picker"),
         ("ndfbin_decks/io/divisions", "the 师/国家 parser"),
+        # Reads Division.ndfbin plus every .dic in the mod, for the 师 names.
+        # Reached from Session.divisions(), so a dropped import here shows up
+        # as a picker full of AGF_<hash> rather than as a crash.
+        ("ndfbin_decks/io/division_names", "readable division names"),
         ("ndfbin_decks/io/unit_universe", "the unit universe"),
         # 只从动作栏那个「导出装备清单」按钮进得去：少了它的构建照样能启动、
         # 照样能改牌组，只在有人想导出时才会炸。
